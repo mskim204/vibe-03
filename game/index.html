@@ -122,6 +122,15 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--signal); ou
 .list .x { color: var(--bad); }
 kbd { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 .foot { color: var(--muted); font-size: 12px; }
+/* correct-answer star rain */
+.stars { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
+.stars i { position: absolute; top: -48px; font-style: normal; line-height: 1; animation: star-fall var(--dur) cubic-bezier(.35, .1, .6, 1) var(--delay) forwards; }
+@keyframes star-fall {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+  8% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(var(--drift), calc(100vh + 64px)) rotate(var(--spin)); opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -755,6 +764,25 @@ const TOPO = {"type":"Topology","objects":{"countries":{"type":"GeometryCollecti
     if (k) openHint(k);
   }
 
+  function starRain() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const box = document.createElement('div');
+    box.className = 'stars'; box.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 28; i++) {
+      const st = document.createElement('i');
+      st.textContent = '⭐';
+      st.style.left = Math.random() * 100 + 'vw';
+      st.style.fontSize = (18 + Math.random() * 22) + 'px';
+      st.style.setProperty('--dur', (1.6 + Math.random() * 1.2) + 's');
+      st.style.setProperty('--delay', (Math.random() * 0.6) + 's');
+      st.style.setProperty('--drift', (Math.random() * 120 - 60) + 'px');
+      st.style.setProperty('--spin', (Math.random() * 720 - 360) + 'deg');
+      box.appendChild(st);
+    }
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 3600);
+  }
+
   function submit(text) {
     if (S.done) return;
     const v = norm(text || '');
@@ -765,6 +793,7 @@ const TOPO = {"type":"Topology","objects":{"countries":{"type":"GeometryCollecti
       S.score += p; S.streak++;
       S.results.push({ code: c.code, ok: true, pts: p });
       S.done = true; S.msg = '';
+      starRain();
     } else {
       S.wrong++;
       if (S.wrong >= MAX_WRONG) { giveUp(); return; }
