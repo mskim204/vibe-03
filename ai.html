@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI에게 물어보기</title>
+<script>
+// ===== 여기만 바꾸면 돼요 =====
+const SERVER_URL = "https://script.google.com/macros/s/AKfycbw5e2VaJzlwoMKoy-X5Tk4jKBKYJllw1LC99mnAsaYtsbB1A3YOgc-uUL1yd4CCuAUmvg/exec"; // 선생님 중계 서버 주소
+const CLASS_CODE = "vibe7128";                                          // 수업 코드
+const MAX_MESSAGES = 10;                                                // AI에게 보낼 최근 대화 개수
+// AI 성격 4개: 버튼 이름(name)과 시스템 지시문(system). 첫 번째가 처음 선택돼요.
+const PERSONAS = [
+  { name: "📚 친절한 공부 도우미",   system: "너는 친절한 공부 도우미야. 학생의 눈높이에 맞춰 쉬운 말로, 예시를 들어 차근차근 설명하고 따뜻하게 격려해 줘." },
+  { name: "💪 엄격한 체육 선생님",   system: "너는 엄격한 체육 선생님이야. 짧고 힘 있는 말투로 핵심만 말하고, 게으름은 따끔하게 지적하되 끝까지 해내도록 응원해 줘." },
+  { name: "📜 조선 시대 선비",       system: "너는 조선 시대 선비야. '~하오', '~이니라' 같은 옛말투로 점잖게 답하고, 가끔 옛 성현의 말씀을 빌려 깨우침을 줘." },
+  { name: "🤪 웃긴 친구",           system: "너는 장난기 많은 친구야. 반말로 재미있게, 농담을 섞어서 답해 줘." }
+];
+// ==============================
+</script>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 0 auto; padding: 32px 16px; background: #f5f6fb; color: #222; }
+  h1 { text-align: center; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 90px; padding: 12px; font: inherit; font-size: 1rem; border: 1px solid #ccc; border-radius: 10px; resize: vertical; }
+  button { margin-top: 10px; width: 100%; padding: 14px; font-size: 1.1rem; font-weight: bold; color: #fff; background: #4f46e5; border: none; border-radius: 10px; cursor: pointer; }
+  button:disabled { background: #a5a3e8; cursor: default; }
+  .personas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .personas button { margin: 0; padding: 10px; font-size: .95rem; color: #4f46e5; background: #fff; border: 2px solid #c7c5f3; }
+  .personas button[aria-pressed="true"] { color: #fff; background: #4f46e5; border-color: #4f46e5; }
+  .memory { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; color: #666; font-size: .9rem; }
+  .memory button { width: auto; margin: 0; padding: 8px 14px; font-size: .95rem; color: #4f46e5; background: #fff; border: 2px solid #c7c5f3; }
+  #status { min-height: 1.5em; margin: 14px 0 6px; color: #666; }
+  #answer { min-height: 120px; padding: 16px; background: #fff; border: 1px solid #ddd; border-radius: 10px; white-space: pre-wrap; line-height: 1.6; }
+  #answer.error { color: #b3261e; background: #fdecea; border-color: #f3b8b2; }
+</style>
+</head>
+<body>
+<h1>🤖 AI에게 물어보기</h1>
+
+<p style="margin:0 0 8px;color:#666">AI 성격 고르기</p>
+<div class="personas" id="personas" role="group" aria-label="AI 성격"></div>
+
+<textarea id="question" placeholder="궁금한 것을 적어 보세요. (Enter: 보내기, Shift+Enter: 줄바꿈)"></textarea>
+<button id="send">보내기</button>
+<div class="memory">
+  <span id="memoryText">기억 중인 대화: 없음</span>
+  <button id="newChat" type="button">새 대화</button>
+</div>
+
+<p id="status" aria-live="polite"></p>
+<div id="answer" aria-live="polite">답변이 여기에 나와요.</div>
+
+<script>
+const questionBox = document.getElementById("question");
+const sendBtn = document.getElementById("send");
+const statusText = document.getElementById("status");
+const answerBox = document.getElementById("answer");
+const personaBox = document.getElementById("personas");
+let currentSystem = PERSONAS[0].system;
+let history = []; // 지금까지 나눈 질문(user)과 답(assistant), 순서대로
+
+function updateMemoryText() {
+  const turns = history.length / 2;
+  document.getElementById("memoryText").textContent =
+    turns ? "기억 중인 대화: 질문과 답 " + turns + "번" : "기억 중인 대화: 없음";
+}
+
+// 앞 대화 + 새 질문 중 최근 MAX_MESSAGES개. 맨 앞은 질문(user)이 오도록 맞춰요.
+function recentMessages(question) {
+  const all = history.concat({ role: "user", content: question });
+  let recent = all.slice(-MAX_MESSAGES);
+  if (recent[0].role !== "user") recent = recent.slice(1);
+  return recent;
+}
+
+PERSONAS.forEach((p, i) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = p.name;
+  btn.setAttribute("aria-pressed", i === 0);
+  btn.addEventListener("click", () => {
+    currentSystem = p.system;
+    personaBox.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === btn));
+    statusText.textContent = p.name + " 성격으로 바뀌었어요.";
+  });
+  personaBox.appendChild(btn);
+});
+
+function showAnswer(text, isError) {
+  answerBox.textContent = text;
+  answerBox.classList.toggle("error", !!isError);
+}
+
+async function ask() {
+  const question = questionBox.value.trim();
+  if (!question) { showAnswer("질문을 먼저 적어 주세요.", true); return; }
+
+  sendBtn.disabled = true;
+  statusText.textContent = "생각 중…";
+  showAnswer("", false);
+
+  try {
+    const res = await fetch(SERVER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({
+        code: CLASS_CODE,
+        system: currentSystem,
+        messages: recentMessages(question)
+      })
+    });
+    const raw = await res.text();
+    let data;
+    try { data = JSON.parse(raw); }
+    catch (e) { throw new Error("서버 응답을 읽을 수 없어요. (HTTP " + res.status + ")"); }
+
+    if (data.ok) {
+      showAnswer(data.text, false);
+      history.push({ role: "user", content: question }, { role: "assistant", content: data.text });
+      updateMemoryText();
+      questionBox.value = "";
+    }
+    else showAnswer("오류: " + (data.error || "알 수 없는 이유"), true);
+  } catch (e) {
+    showAnswer("오류: " + (e.message || "서버에 연결할 수 없어요."), true);
+  } finally {
+    statusText.textContent = "";
+    sendBtn.disabled = false;
+  }
+}
+
+sendBtn.addEventListener("click", ask);
+document.getElementById("newChat").addEventListener("click", () => {
+  history = [];
+  updateMemoryText();
+  questionBox.value = "";
+  showAnswer("새 대화를 시작해요. 앞 대화는 잊었어요.", false);
+  questionBox.focus();
+});
+questionBox.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(); }
+});
+</script>
+</body>
+</html>
