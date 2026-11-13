@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 질문 앱</title>
+<style>
+  body { font-family: "맑은 고딕", sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; background: #f5f7fb; }
+  h1 { color: #4338ca; }
+  .personas button { margin: 0 6px 6px 0; padding: 8px 12px; border: 2px solid #4338ca; background: #fff; color: #4338ca; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .personas button.on { background: #4338ca; color: #fff; }
+  #now { font-size: 14px; color: #555; margin: 4px 0 12px; }
+  #chat { background: #fff; border-radius: 8px; padding: 12px; min-height: 200px; max-height: 420px; overflow-y: auto; }
+  .msg { margin: 8px 0; padding: 10px 14px; border-radius: 14px; max-width: 80%; white-space: pre-wrap; }
+  .user { background: #4338ca; color: #fff; margin-left: auto; }
+  .ai { background: #eef2ff; }
+  .error { color: #dc2626; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  textarea { flex: 1; height: 60px; font-size: 16px; padding: 8px; }
+  .row button { padding: 0 18px; font-size: 16px; background: #4338ca; color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
+  .row button:disabled { background: #a5b4fc; }
+  #reset { background: #6b7280; }
+</style>
+</head>
+<body>
+<h1>🤖 AI 질문 앱</h1>
+<div id="now"></div>
+<div id="chat"></div>
+<div class="row">
+  <textarea id="question" placeholder="AI에게 말을 걸어 보세요 (Enter = 보내기)"></textarea>
+  <button id="send">보내기</button>
+  <button id="reset">새 대화</button>
+</div>
+
+<script>
+// 21·22차시 완성 파일 (21차시 AI 질문 앱 + 22차시 대화 기억하기)
+// ★ 처음 한 번: 아래 "(수업 코드)"를 칠판에 적힌 수업 코드로 바꾸기 — 괄호까지 지우기!
+//    클로드에게 이렇게 말해도 돼요 → ai.html의 (수업 코드)를 칠판 코드로 바꿔줘: 코드
+// ===== 여기만 고치면 돼요 =====
+const SERVER_URL = "https://script.google.com/macros/s/AKfycbw5e2VaJzlwoMKoy-X5Tk4jKBKYJllw1LC99mnAsaYtsbB1A3YOgc-uUL1yd4CCuAUmvg/exec";
+const CLASS_CODE = "vibe7128";
+const SYSTEM = "너는 친절한 공부 도우미야. 중학생이 알아듣기 쉽게 짧게 답해. 마크다운(별표 등)은 쓰지 마.";   // AI 성격
+const MAX_MESSAGES = 10;   // 최근 대화 몇 개까지 보낼지
+// ===============================
+
+let history = [];   // 지금까지 나눈 질문과 답
+
+const chatEl = document.getElementById("chat");
+const questionEl = document.getElementById("question");
+const sendBtn = document.getElementById("send");
+document.getElementById("now").textContent = "지금 AI 성격: " + SYSTEM;
+
+function addMsg(text, cls) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  chatEl.appendChild(d);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return d;
+}
+
+async function send() {
+  const question = questionEl.value.trim();
+  if (!question || sendBtn.disabled) return;
+  questionEl.value = "";
+  addMsg(question, "user");
+  history.push({ role: "user", content: question });
+  const thinking = addMsg("생각 중… (10초쯤 걸릴 수 있어요)", "ai");
+  sendBtn.disabled = true;
+  try {
+    const res = await fetch(SERVER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ code: CLASS_CODE, system: SYSTEM, messages: history.slice(-MAX_MESSAGES) })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      thinking.textContent = data.text.replace(/\*\*/g, "");
+      history.push({ role: "assistant", content: data.text });
+    } else {
+      thinking.className = "msg ai error";
+      thinking.textContent = "오류: " + data.error;
+      history.pop();
+    }
+  } catch (err) {
+    thinking.className = "msg ai error";
+    thinking.textContent = "오류: 서버에 연결하지 못했어요 (" + err.message + ")";
+    history.pop();
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+sendBtn.addEventListener("click", send);
+// Enter = 보내기, Shift+Enter = 줄바꿈
+questionEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+});
+document.getElementById("reset").addEventListener("click", () => {
+  history = [];
+  chatEl.innerHTML = "";
+  addMsg("새 대화를 시작해요. 앞의 대화는 잊었어요!", "ai");
+});
+</script>
+</body>
+</html>
