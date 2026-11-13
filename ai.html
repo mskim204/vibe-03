@@ -75,15 +75,26 @@ const SYSTEM = "[역할]\n" + ROLE +
   .tag { font-size: .8rem; padding: 2px 8px; border-radius: 99px; background: var(--soft); color: var(--main); }
   .q { font-size: 1.05rem; line-height: 1.6; margin: 0 0 10px; white-space: pre-wrap; }
   .choices { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 6px; }
-  .choices li { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
-  .choices li.correct { border-color: var(--ok); background: #f0fdf4; color: var(--ok); font-weight: bold; }
+  .choices button { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; font-size: 1rem; color: #222; background: #fff; border: 2px solid var(--line); }
+  .choices button:not(:disabled):hover { border-color: #a5b4fc; background: #f8f9ff; }
+  .choices button:disabled { cursor: default; }
+  .choices .no { flex: none; min-width: 2.6em; padding: 2px 6px; border-radius: 6px; background: var(--soft); color: var(--main); font-weight: bold; text-align: center; font-size: .9rem; }
+  .choices button.correct { border-color: var(--ok); background: #f0fdf4; color: var(--ok); font-weight: bold; }
+  .choices button.wrong { border-color: var(--bad); background: #fef2f2; color: var(--bad); }
+  .choices button.picked::after { content: "← 내가 고른 답"; margin-left: auto; font-size: .8rem; font-weight: normal; }
+  .feedback { font-weight: bold; margin-bottom: 4px; }
+  .feedback.good { color: var(--ok); }
+  .feedback.bad { color: var(--bad); }
+  .score { font-weight: bold; color: var(--main); }
+  .head-btns { display: flex; gap: 8px; flex-wrap: wrap; }
   .answer { display: none; background: var(--soft); border-radius: 8px; padding: 10px 12px; line-height: 1.6; }
   .card.open .answer { display: block; }
   .answer b { color: var(--ok); }
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; margin-top: 8px; }
   th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
   th { background: var(--main); color: #fff; font-weight: normal; }
-  th:first-child, td:first-child { width: 56px; white-space: nowrap; text-align: center; font-weight: bold; color: var(--main); }
+  th:first-child, td:first-child { width: 56px; white-space: nowrap; text-align: center; }
+  td:first-child { font-weight: bold; color: var(--main); }
   .table-wrap { overflow-x: auto; }
   .hidden { display: none; }
 </style>
@@ -113,8 +124,14 @@ const SYSTEM = "[역할]\n" + ROLE +
 
 <div id="result" class="hidden">
   <div class="quiz-head">
-    <h2 id="quizTitle"></h2>
-    <button id="toggleAll" class="ghost" type="button">정답 모두 보기</button>
+    <div>
+      <h2 id="quizTitle"></h2>
+      <div id="score" class="score"></div>
+    </div>
+    <div class="head-btns">
+      <button id="restart" class="ghost" type="button">처음부터 다시 풀기</button>
+      <button id="toggleAll" class="ghost" type="button">정답 모두 보기</button>
+    </div>
   </div>
   <div id="cards"></div>
   <h3>📋 정답표</h3>
@@ -180,8 +197,24 @@ function parseQuiz(text) {
   return data;
 }
 
+// ---- 보기 중 몇 번이 정답인지 찾기 ----
+// AI가 정답을 "빛"처럼 보기 글로 줄 수도, "1"·"1번"·"①"처럼 번호로 줄 수도 있어요.
+function findCorrect(q) {
+  const a = q.answer.trim();
+  let idx = q.choices.findIndex(c => c.trim() === a);
+  if (idx >= 0) return idx;
+  const circled = "①②③④⑤⑥".indexOf(a.charAt(0));
+  if (circled >= 0 && circled < q.choices.length) return circled;
+  const m = a.match(/^(\d+)\s*번?$/);
+  if (m && +m[1] >= 1 && +m[1] <= q.choices.length) return +m[1] - 1;
+  return q.choices.findIndex(c => c.trim() && (a.includes(c.trim()) || c.includes(a)));
+}
+
+let currentQuiz = null;
+
 // ---- 카드와 정답표 그리기 ----
 function render(quiz) {
+  currentQuiz = quiz;
   document.getElementById("quizTitle").textContent = quiz.title;
   cardsEl.innerHTML = "";
   tableEl.innerHTML = "";
@@ -192,22 +225,35 @@ function render(quiz) {
     top.append(el("span", "num", "Q" + (i + 1)), el("span", "tag", q.type));
     card.append(top, el("p", "q", q.question));
 
+    const correctIdx = q.choices.length ? findCorrect(q) : -1;
     if (q.choices.length) {
-      const ul = el("ol", "choices");
+      card.dataset.choice = "1";   // 골라서 푸는 문제 (점수에 들어가요)
+      const list = el("ol", "choices");
       q.choices.forEach((c, j) => {
-        const li = el("li", "", (q.choices.length > 2 ? "①②③④⑤⑥"[j] + " " : "") + c);
-        if (c.trim() === q.answer.trim()) li.dataset.correct = "1";
-        ul.append(li);
+        const b = el("button");
+        b.type = "button";
+        // OX는 O/X 그대로, 나머지는 1번·2번·3번·4번
+        if (q.choices.length > 2) b.append(el("span", "no", (j + 1) + "번"));
+        b.append(el("span", "", c));
+        if (j === correctIdx) b.dataset.correct = "1";
+        b.addEventListener("click", () => choose(card, b, j === correctIdx));
+        const li = el("li");
+        li.append(b);
+        list.append(li);
       });
-      card.append(ul);
+      card.append(list);
     }
 
     const ans = el("div", "answer");
-    ans.append(el("b", "", "정답: " + q.answer));
+    ans.append(el("div", "feedback"));
+    const answerText = correctIdx >= 0 && q.choices.length > 2
+      ? (correctIdx + 1) + "번 " + q.choices[correctIdx]
+      : q.answer;
+    ans.append(el("b", "", "정답: " + answerText));
     if (q.explanation) ans.append(el("div", "", "해설: " + q.explanation));
     card.append(ans);
 
-    const btn = el("button", "ghost", "정답 보기");
+    const btn = el("button", "ghost toggle", "정답 보기");
     btn.type = "button";
     btn.style.marginTop = "8px";
     btn.addEventListener("click", () => setOpen(card, !card.classList.contains("open")));
@@ -215,19 +261,48 @@ function render(quiz) {
     cardsEl.append(card);
 
     const tr = el("tr");
-    tr.append(el("td", "", i + 1), el("td", "", q.type), el("td", "", q.answer));
+    tr.append(el("td", "", i + 1), el("td", "", q.type), el("td", "", answerText));
     tableEl.append(tr);
   });
 
   toggleAllBtn.textContent = "정답 모두 보기";
+  updateScore();
   resultEl.classList.remove("hidden");
+}
+
+// 보기를 골랐을 때: 맞았는지 보여 주고, 그 문제는 더 못 바꿔요.
+function choose(card, btn, isCorrect) {
+  if (card.dataset.done) return;
+  card.dataset.done = isCorrect ? "right" : "wrong";
+  btn.classList.add("picked");
+  if (!isCorrect) btn.classList.add("wrong");
+  const fb = card.querySelector(".feedback");
+  fb.textContent = isCorrect ? "⭕ 정답이에요!" : "❌ 아쉬워요. 정답을 확인해 보세요.";
+  fb.className = "feedback " + (isCorrect ? "good" : "bad");
+  setOpen(card, true);
+  updateScore();
 }
 
 function setOpen(card, open) {
   card.classList.toggle("open", open);
-  card.querySelector("button").textContent = open ? "정답 숨기기" : "정답 보기";
-  card.querySelectorAll("li[data-correct]").forEach(li => li.classList.toggle("correct", open));
+  card.querySelector(".toggle").textContent = open ? "정답 숨기기" : "정답 보기";
+  card.querySelectorAll("[data-correct]").forEach(b => b.classList.toggle("correct", open));
+  // 정답을 본 뒤에는 고를 수 없어요. (아직 안 푼 문제는 정답을 숨기면 다시 고를 수 있어요)
+  card.querySelectorAll(".choices button").forEach(b => b.disabled = open || !!card.dataset.done);
 }
+
+function updateScore() {
+  const cards = [...cardsEl.querySelectorAll('.card[data-choice]')];
+  const solved = cards.filter(c => c.dataset.done).length;
+  const right = cards.filter(c => c.dataset.done === "right").length;
+  document.getElementById("score").textContent = cards.length
+    ? "점수: " + right + " / " + cards.length + " (푼 문제 " + solved + "개)"
+    : "";
+}
+
+document.getElementById("restart").addEventListener("click", () => {
+  if (currentQuiz) render(currentQuiz);
+});
 
 toggleAllBtn.addEventListener("click", () => {
   const cards = [...cardsEl.children];
