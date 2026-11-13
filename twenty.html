@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>동물 스무고개</title>
+<script>
+// ===== 여기만 고치면 돼요 =====
+const SERVER_URL = "https://script.google.com/macros/s/AKfycbw5e2VaJzlwoMKoy-X5Tk4jKBKYJllw1LC99mnAsaYtsbB1A3YOgc-uUL1yd4CCuAUmvg/exec";
+const CLASS_CODE = "vibe7128";
+const MAX_QUESTIONS = 20;   // 질문할 수 있는 횟수
+const MAX_INPUT = 100;      // 질문 한 번에 쓸 수 있는 글자 수
+
+// AI 성격(system): 역할 · 규칙 · 답 모양
+const ROLE = "너는 스무고개 게임의 출제자야. 동물 하나를 마음속에 정해 두고 학생의 질문에 답해.";
+const RULES = [
+  "게임을 시작할 때 정한 동물은 게임이 끝날 때까지 절대 바꾸지 마. 앞의 대화를 기억해서 답이 서로 어긋나지 않게 해.",
+  "학생이 동물 이름을 맞히면 '정답'이라고 답해.",
+  "그 밖의 질문에는 '예' 또는 '아니요'로만 답해. 설명이나 힌트는 절대 붙이지 마.",
+  "예/아니요로 답할 수 없는 질문이면 '예아니요질문'이라고만 답해.",
+  "학생이 정답을 물어봐도 동물 이름을 말하지 마."
+];
+const FORMAT = "답은 '예', '아니요', '정답', '예아니요질문' 넷 중 하나의 낱말만 써. 다른 글자는 쓰지 마.";
+
+// 게임을 시작할 때 AI가 동물을 고르게 하는 말 (종류를 섞어서 매번 다른 동물이 나오게 해요)
+const KINDS = ["포유류", "새", "물고기", "곤충", "파충류", "양서류", "바다 동물", "농장 동물", "아프리카 동물", "숲속 동물"];
+// ===============================
+
+const SYSTEM = "[역할]\n" + ROLE +
+  "\n\n[규칙]\n" + RULES.map((r, i) => (i + 1) + ". " + r).join("\n") +
+  "\n\n[답 모양]\n" + FORMAT;
+</script>
+<style>
+  :root { --main: #4338ca; --soft: #eef2ff; --line: #dfe3f0; --ok: #15803d; --bad: #b91c1c; --warn: #b45309; }
+  * { box-sizing: border-box; }
+  body { font-family: "맑은 고딕", sans-serif; max-width: 640px; margin: 0 auto; padding: 32px 16px 60px; background: #f5f7fb; color: #222; }
+  h1 { color: var(--main); margin: 0 0 4px; }
+  .sub { color: #666; margin: 0 0 16px; line-height: 1.5; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 0; }
+  .primary { padding: 12px 18px; font-size: 1.05rem; font-weight: bold; color: #fff; background: var(--main); }
+  .primary:disabled { background: #a5b4fc; cursor: default; }
+  .ghost { padding: 10px 14px; color: var(--main); background: #fff; border: 2px solid #c7d2fe; font-weight: bold; }
+  .ghost:disabled { opacity: .5; cursor: default; }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-weight: bold; }
+  .left { color: var(--main); font-size: 1.1rem; }
+  .memory { font-size: .85rem; color: #666; font-weight: normal; }
+  .dots { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; margin-bottom: 14px; }
+  .dots span { height: 8px; border-radius: 99px; background: var(--soft); }
+  .dots span.used { background: var(--main); }
+  #log { min-height: 160px; max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+  .empty { color: #888; text-align: center; margin: auto; }
+  .turn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .turn .n { flex: none; min-width: 2.2em; font-weight: bold; color: var(--main); }
+  .turn .q { flex: 1; white-space: pre-wrap; word-break: break-word; }
+  .badge { flex: none; padding: 4px 12px; border-radius: 99px; font-weight: bold; }
+  .badge.yes { background: #dcfce7; color: var(--ok); }
+  .badge.no { background: #fee2e2; color: var(--bad); }
+  .badge.win { background: #fef3c7; color: var(--warn); }
+  .badge.wait { background: var(--soft); color: #666; font-weight: normal; }
+  .note { padding: 8px 12px; border-radius: 10px; background: #fff7ed; color: var(--warn); font-size: .95rem; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  input[type=text] { flex: 1; min-width: 0; padding: 12px; font: inherit; font-size: 1rem; border: 1px solid #ccc; border-radius: 10px; }
+  .counter { text-align: right; font-size: .8rem; color: #888; margin-top: 4px; }
+  .tools { display: flex; gap: 8px; margin-top: 10px; }
+  .tools button { flex: 1; }
+  .error-box { margin-top: 12px; background: #fdecea; color: var(--bad); border: 1px solid #f3b8b2; border-radius: 12px; padding: 12px 14px; }
+  .error-box button { margin-top: 8px; padding: 8px 14px; color: #fff; background: var(--bad); font-weight: bold; }
+  .end { margin-top: 14px; text-align: center; padding: 18px; border-radius: 14px; }
+  .end.win { background: #fef9c3; }
+  .end.lose { background: #f3f4f6; }
+  .end .big { font-size: 1.6rem; font-weight: bold; margin: 6px 0; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>🐾 동물 스무고개</h1>
+<p class="sub">AI가 몰래 동물 하나를 정했어요. <b>예/아니요</b>로 답할 수 있는 질문을 해서 20번 안에 맞혀 보세요!<br>
+<small>예) 다리가 4개야? · 바다에 살아? · 고양이야?</small></p>
+
+<div class="panel">
+  <div class="bar">
+    <span class="left" id="left"></span>
+    <span class="memory" id="memory"></span>
+  </div>
+  <div class="dots" id="dots"></div>
+
+  <div id="log"></div>
+
+  <div id="end" class="end hidden"></div>
+
+  <div id="askArea">
+    <div class="row">
+      <input type="text" id="q" placeholder="예/아니요로 답할 질문 또는 동물 이름" autocomplete="off">
+      <button id="ask" class="primary">질문</button>
+    </div>
+    <div class="counter" id="counter"></div>
+  </div>
+  <div id="error" class="hidden"></div>
+
+  <div class="tools">
+    <button id="giveup" class="ghost" type="button">🏳️ 포기하고 정답 보기</button>
+    <button id="newGame" class="ghost" type="button">🔄 새 게임</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const qEl = $("q"), askBtn = $("ask"), logEl = $("log");
+
+// ★ 22차시 대화 기억: 지금까지 나눈 말을 모두 모아 두었다가 질문할 때마다 통째로 보내요.
+//   AI는 앞 대화를 스스로 기억하지 못해서, 이렇게 보내 줘야 처음 정한 동물을 잊지 않아요.
+//   맨 앞 두 개(게임 시작 부탁 + AI가 정한 동물)가 빠지면 AI가 동물을 잊어버리니, 자르지 않고 모두 보내요.
+let history = [];
+let secret = "";     // AI가 정한 동물 (화면에는 안 보여요)
+let used = 0;        // 사용한 질문 수
+let over = true;     // 게임이 끝났는지
+let busy = false;
+let retryAction = null;
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// ---- 화면 상태 ----
+function updateBar() {
+  $("left").textContent = over && !secret ? "게임 준비 중…" : "남은 질문 " + (MAX_QUESTIONS - used) + "번";
+  $("memory").textContent = "AI에게 보내는 대화 기억: " + history.length + "개";
+  const dots = $("dots");
+  dots.style.gridTemplateColumns = "repeat(" + MAX_QUESTIONS + ", 1fr)";
+  dots.innerHTML = "";
+  for (let i = 0; i < MAX_QUESTIONS; i++) dots.append(el("span", i < used ? "used" : ""));
+  const lock = over || busy;
+  qEl.disabled = lock;
+  askBtn.disabled = lock;
+  $("giveup").disabled = lock;
+  $("askArea").classList.toggle("hidden", over && !!secret);
+}
+
+qEl.maxLength = MAX_INPUT;
+function updateCounter() { $("counter").textContent = qEl.value.length + " / " + MAX_INPUT + "자"; }
+qEl.addEventListener("input", updateCounter);
+
+function showError(msg, action) {
+  retryAction = action;
+  const box = $("error");
+  box.innerHTML = "";
+  box.className = "error-box";
+  box.append(el("div", "", "⚠️ " + msg));
+  const b = el("button", "", "🔄 다시 시도");
+  b.type = "button";
+  b.addEventListener("click", () => { box.className = "hidden"; retryAction && retryAction(); });
+  box.append(b);
+}
+function hideError() { $("error").className = "hidden"; }
+
+// ---- 선생님 중계 서버에 보내기 (ai.html과 같은 방법) ----
+async function callAI(messages) {
+  let res;
+  try {
+    res = await fetch(SERVER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ code: CLASS_CODE, system: SYSTEM, messages })
+    });
+  } catch (e) {
+    throw new Error("서버에 연결하지 못했어요. (" + e.message + ")");
+  }
+  let data;
+  try { data = JSON.parse(await res.text()); }
+  catch (e) { throw new Error("서버 응답을 읽을 수 없어요. (HTTP " + res.status + ")"); }
+  if (!data.ok) throw new Error(data.error || "알 수 없는 이유");
+  return String(data.text || "");
+}
+
+// ---- 새 게임: AI에게 동물을 몰래 정하게 해요 ----
+async function newGame() {
+  history = []; secret = ""; used = 0; over = true; busy = true;
+  logEl.innerHTML = "";
+  logEl.append(el("div", "empty", "🤫 AI가 동물을 고르는 중…"));
+  $("end").className = "end hidden";
+  hideError();
+  updateBar();
+
+  const kind = KINDS[Math.floor(Math.random() * KINDS.length)];
+  const startMsg = "스무고개 새 게임을 시작하자. 이번에는 '" + kind + "' 중에서 중학생이 알 만한 동물 하나를 골라. " +
+    "(게임 번호 " + Math.floor(Math.random() * 10000) + ") 이번 답만은 다른 말 없이 {\"동물\":\"동물 이름\"} 모양의 JSON으로 답해.";
+  try {
+    const text = await callAI([{ role: "user", content: startMsg }]);
+    const m = text.match(/\{[\s\S]*\}/);
+    let animal = "";
+    try { animal = m ? String(JSON.parse(m[0]).동물 || "").trim() : ""; } catch (e) {}
+    if (!animal) throw new Error("AI가 동물을 제대로 정하지 못했어요.");
+
+    secret = animal;
+    history.push({ role: "user", content: startMsg }, { role: "assistant", content: text.trim() });
+    over = false;
+    logEl.innerHTML = "";
+    logEl.append(el("div", "empty", "✅ 동물을 정했어요! 첫 질문을 해 보세요."));
+  } catch (e) {
+    logEl.innerHTML = "";
+    showError(e.message, newGame);
+  } finally {
+    busy = false;
+    updateBar();
+    if (!over) qEl.focus();
+  }
+}
+
+// ---- AI 답을 예/아니요/정답으로 정리하기 ----
+function normalize(text) {
+  const t = text.replace(/[\s.!"'`*]/g, "");
+  if (t.startsWith("정답")) return "win";
+  if (t.includes("예아니요질문")) return "bad";
+  if (t.startsWith("아니")) return "no";
+  if (t.startsWith("예") || t.startsWith("네")) return "yes";
+  return "";
+}
+
+// 정답 동물 이름이 질문에 들어 있는지 (예: "고양이야?" → 고양이)
+function mentionsSecret(q) {
+  const clean = s => s.replace(/\s/g, "");
+  return secret && clean(q).includes(clean(secret));
+}
+
+// ---- 질문하기 ----
+async function ask(question) {
+  if (question === undefined) question = qEl.value.trim().slice(0, MAX_INPUT);
+  if (!question || over || busy) return;
+  busy = true;
+  hideError();
+  updateBar();
+
+  if (logEl.querySelector(".empty")) logEl.innerHTML = "";
+  const turn = el("div", "turn");
+  const badge = el("span", "badge wait", "생각 중…");
+  turn.append(el("span", "n", "Q" + (used + 1)), el("span", "q", question), badge);
+  logEl.append(turn);
+  logEl.scrollTop = logEl.scrollHeight;
+
+  const messages = history.concat({ role: "user", content: question });
+  try {
+    const text = await callAI(messages);
+    let kind = normalize(text);
+    // AI가 "예"라고만 했어도 질문에 정답 동물 이름이 있으면 맞힌 걸로 쳐요.
+    if (kind === "yes" && mentionsSecret(question)) kind = "win";
+    if (!kind) throw new Error("AI가 예/아니요로 답하지 않았어요. (" + text.slice(0, 40) + ")");
+
+    qEl.value = "";
+    updateCounter();
+    if (kind === "bad") {
+      // 예/아니요 질문이 아니면 횟수를 쓰지 않아요.
+      turn.className = "note";
+      turn.textContent = "💡 \"" + question + "\" → 예/아니요로 답할 수 있게 다시 물어봐 주세요. (횟수는 그대로예요)";
+      return;
+    }
+
+    history.push({ role: "user", content: question }, { role: "assistant", content: text.trim() });
+    used++;
+    badge.className = "badge " + kind;
+    badge.textContent = kind === "yes" ? "⭕ 예" : kind === "no" ? "❌ 아니요" : "🎉 정답";
+
+    if (kind === "win") finish(true);
+    else if (used >= MAX_QUESTIONS) finish(false);
+  } catch (e) {
+    turn.remove();
+    if (!logEl.children.length) logEl.append(el("div", "empty", "첫 질문을 해 보세요."));
+    showError(e.message, () => ask(question));
+  } finally {
+    busy = false;
+    updateBar();
+    logEl.scrollTop = logEl.scrollHeight;
+    if (!over) qEl.focus();
+  }
+}
+
+// ---- 게임 끝 ----
+function finish(win) {
+  over = true;
+  const end = $("end");
+  end.innerHTML = "";
+  end.className = "end " + (win ? "win" : "lose");
+  if (win) {
+    end.append(el("div", "", "🎉 " + used + "번 만에 맞혔어요!"), el("div", "big", secret));
+  } else {
+    end.append(el("div", "", used >= MAX_QUESTIONS ? "😢 질문을 모두 썼어요. 정답은…" : "🏳️ 포기했어요. 정답은…"), el("div", "big", secret));
+  }
+  const again = el("button", "primary", "한 판 더!");
+  again.type = "button";
+  again.addEventListener("click", newGame);
+  end.append(again);
+  updateBar();
+}
+
+askBtn.addEventListener("click", () => ask());
+qEl.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); ask(); }
+});
+$("giveup").addEventListener("click", () => {
+  if (!over && confirm("정말 포기하고 정답을 볼까요?")) finish(false);
+});
+$("newGame").addEventListener("click", () => {
+  if (busy) return;
+  if (over || used === 0 || confirm("지금 게임을 그만두고 새 게임을 시작할까요?")) newGame();
+});
+
+updateCounter();
+newGame();
+</script>
+</body>
+</html>
