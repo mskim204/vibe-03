@@ -7,23 +7,24 @@
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 // ===== 여기만 고치면 돼요 =====
-// 방 만들 때 고를 수 있는 범위: [가장 작은 값, 가장 큰 값, 한 칸, 처음 값]
-const LIMITS = {
-  hp:   [50, 500, 10, 100],   // 최대 체력
-  atk:  [5, 100, 5, 25],      // 공격 피해 (방어하면 이만큼 줄어서 완전히 막혀요)
-  heal: [5, 100, 5, 15],      // 회복량
-  uses: [1, 10, 1, 5]         // 공격 · 방어 · 회복 각각 쓸 수 있는 횟수 (최대 10번)
-};
-// 고를 수 있는 사람 캐릭터: 피부 · 머리색 · 머리 모양(short 짧은, long 긴, spiky 삐죽, hat 마법모자, band 머리띠) · 옷 · 바지
+const USES = { atk: 5, def: 5, heal: 5 };   // 공격 · 방어 · 회복 각각 쓸 수 있는 횟수
+const POINTS = { win: 30, draw: 20, lose: 10 };   // 한 판 끝날 때마다 받는 포인트
+
+// 캐릭터: 체력(hp) · 공격(atk) · 회복(heal)은 캐릭터마다 정해져 있어요. 방어하면 공격을 막아요.
+// attack: sword 칼 · magic 마법(방어해도 절반은 들어가요) · beast 동물이 대신 공격
+// cost: 잠금 해제에 드는 포인트 (0 = 처음부터 쓸 수 있어요)
+// 모양: 피부 · 머리색 · 머리 모양(short 짧은, spiky 삐죽, hat 마법모자, safari 탐험모자, cap 모자) · 옷 · 바지
 const CHARS = [
-  { name: "기사",   skin: "#f1c27d", hair: "#5b3a1e", style: "short", shirt: "#94a3b8", pants: "#334155" },
-  { name: "닌자",   skin: "#e0ac69", hair: "#111827", style: "band",  shirt: "#1f2937", pants: "#111827" },
-  { name: "마법사", skin: "#ffdbac", hair: "#d1d5db", style: "hat",   shirt: "#7c3aed", pants: "#4c1d95" },
-  { name: "공주",   skin: "#ffe0bd", hair: "#f59e0b", style: "long",  shirt: "#ec4899", pants: "#be185d" },
-  { name: "전사",   skin: "#c68642", hair: "#b91c1c", style: "spiky", shirt: "#dc2626", pants: "#7f1d1d" },
-  { name: "탐험가", skin: "#8d5524", hair: "#1c1917", style: "short", shirt: "#16a34a", pants: "#854d0e" },
-  { name: "학생",   skin: "#ffdbac", hair: "#3f2a1d", style: "long",  shirt: "#2563eb", pants: "#1e3a8a" },
-  { name: "해적",   skin: "#e0ac69", hair: "#292524", style: "band",  shirt: "#f8fafc", pants: "#57534e" }
+  { name: "기사",   cost: 0,   hp: 100, atk: 20, heal: 15, attack: "sword", info: "균형 잡힌 기본 캐릭터",
+    skin: "#f1c27d", hair: "#5b3a1e", style: "short",  shirt: "#94a3b8", pants: "#334155" },
+  { name: "전사",   cost: 100, hp: 100, atk: 30, heal: 10, attack: "sword", info: "공격이 가장 세요",
+    skin: "#c68642", hair: "#b91c1c", style: "spiky",  shirt: "#dc2626", pants: "#7f1d1d" },
+  { name: "탐험가", cost: 100, hp: 100, atk: 18, heal: 28, attack: "sword", info: "회복을 많이 해요",
+    skin: "#8d5524", hair: "#1c1917", style: "safari", shirt: "#16a34a", pants: "#854d0e" },
+  { name: "마법사", cost: 200, hp: 90,  atk: 24, heal: 15, attack: "magic", info: "지팡이 마법은 방어해도 절반이 들어가요",
+    skin: "#ffdbac", hair: "#d1d5db", style: "hat",    shirt: "#7c3aed", pants: "#4c1d95" },
+  { name: "조련사", cost: 200, hp: 110, atk: 22, heal: 15, attack: "beast", info: "늑대가 달려가서 대신 공격해요",
+    skin: "#e0ac69", hair: "#292524", style: "cap",    shirt: "#ca8a04", pants: "#57534e" }
 ];
 const TEAMS = ["🔴 빨강팀", "🔵 파랑팀"];
 const ROOM_PREFIX = "vibe03-battle/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
@@ -56,7 +57,17 @@ const BROKERS = [
   .row { display: flex; gap: 8px; }
   .row > * { flex: 1; }
   .chars { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chars { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .chars { display: grid; grid-template-columns: repeat(5, 1fr); }
+  .chars button.locked { background: #e2e8f0; color: var(--sub); }
+  .chars button.locked svg { filter: grayscale(1) brightness(.7); opacity: .6; }
+  .lock { display: block; font-size: .7rem; color: #b45309; }
+  .avatar { position: relative; display: block; }
+  .chars .avatar .pet { position: absolute; left: -4px; bottom: 0; }
+  .chars .avatar .pet svg { width: 28px; height: 19px; }
+  .pts { float: right; color: #b45309; }
+  .info { margin-top: 10px; padding: 10px; background: #f8fafc; border-radius: 10px; text-align: center; line-height: 1.6; }
+  .notice { margin-top: 8px; text-align: center; font-weight: bold; color: #b45309; }
+  .earned { margin-top: 8px; font-weight: bold; color: #b45309; font-size: 1.1rem; }
   .chars button { padding: 6px 0 4px; border-radius: 12px; border: 3px solid transparent; background: #f1f5f9; cursor: pointer; font-size: .8rem; font-weight: bold; color: var(--text); }
   .chars button svg { width: 44px; height: 62px; display: block; margin: 0 auto 2px; }
   .mini { width: 20px; height: 28px; vertical-align: middle; }
@@ -91,6 +102,17 @@ const BROKERS = [
   .fighter.ally { width: 84px; } .fighter.ally .body svg { width: 66px; height: 95px; }
   .fighter.me .body svg { width: 140px; height: 200px; margin-bottom: -6px; }
   .fighter.enemy .body { transform: scaleX(-1); }
+  .fighter .pet { position: absolute; z-index: 2; line-height: 0; }
+  .fighter .pet svg { display: block; }
+  .fighter.far .pet { left: -4px; bottom: 1.2em; } .fighter.far .pet svg { width: 28px; height: 19px; }
+  .fighter.ally .pet { left: -10px; bottom: 1.2em; } .fighter.ally .pet svg { width: 40px; height: 27px; }
+  .fighter.me .pet { left: -22px; bottom: .3em; } .fighter.me .pet svg { width: 76px; height: 51px; }
+  .fighter.enemy .pet svg { transform: scaleX(-1); }
+  .fighter.dead .pet { filter: grayscale(1); opacity: .45; }
+  .orb { position: fixed; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; pointer-events: none; z-index: 10;
+    background: radial-gradient(circle, #fff 0%, #c4b5fd 35%, #8b5cf6 65%, #8b5cf600 72%); box-shadow: 0 0 18px 6px #a78bfa; }
+  .anim-cast .arm { animation: cast .9s; }
+  @keyframes cast { 25%, 70% { transform: rotate(-70deg); } }
   .fighter .ready { font-size: .8rem; min-height: 1.1em; line-height: 1.1; }
   .fighter.me .ready { position: absolute; top: 4px; right: -6px; font-size: 1.4rem; }
   .fighter.dead .body { filter: grayscale(1); opacity: .45; transform: rotate(80deg) translateX(20%); }
@@ -155,8 +177,16 @@ let net = null;                      // 지금 들어가 있는 방의 연결
 let isHost = false, room = null;     // 방장만 가지고 있는 진짜 게임 상태
 let view = null, myPid = null;       // 내 화면에 보이는 상태
 let lastRound = 0, choosingTarget = false, queue = Promise.resolve();
-let settings = { hp: LIMITS.hp[3], atk: LIMITS.atk[3], heal: LIMITS.heal[3],
-  uses: { atk: LIMITS.uses[3], def: LIMITS.uses[3], heal: LIMITS.uses[3] }, size: 1 };
+let settings = { uses: { ...USES }, size: 1 };
+
+// ---------- 포인트 저장 (이 기기 브라우저에 저장돼요) ----------
+let save = { points: 0, unlocked: [0], char: 0, name: "" };
+try { Object.assign(save, JSON.parse(localStorage.getItem("vibe03-battle-save")) || {}); } catch (e) {}
+const saveNow = () => { try { localStorage.setItem("vibe03-battle-save", JSON.stringify(save)); } catch (e) {} };
+const isOpen = i => CHARS[i] && (CHARS[i].cost === 0 || save.unlocked.includes(i));
+me.char = isOpen(save.char) ? save.char : 0;
+me.name = save.name || "";
+let awarded = "", earned = 0, notice = "";
 
 // ---------- 사람 캐릭터 그리기 ----------
 function person(i, cls = "") {
@@ -167,8 +197,16 @@ function person(i, cls = "") {
     long:  `<path d="${top}" fill="${c.hair}"/>`,
     spiky: `<path d="M30 37 L26 18 L37 25 L41 9 L50 22 L59 9 L63 25 L74 18 L70 37 Q66 26 50 26 Q34 26 30 37Z" fill="${c.hair}"/>`,
     hat:   `<path d="${top}" fill="${c.hair}"/><path d="M50 -10 L70 22 L30 22Z" fill="${c.shirt}"/><ellipse cx="50" cy="23" rx="26" ry="5" fill="${c.pants}"/><circle cx="54" cy="8" r="3" fill="#facc15"/>`,
-    band:  `<path d="${top}" fill="${c.hair}"/><rect x="30" y="25" width="40" height="6" rx="2" fill="#ef4444"/><path d="M70 27 L80 22 L79 32Z" fill="#ef4444"/>`
+    safari: `<path d="${top}" fill="${c.hair}"/><ellipse cx="50" cy="22" rx="28" ry="5" fill="#a16207"/><path d="M33 22 Q33 4 50 4 Q67 4 67 22Z" fill="#ca8a04"/><rect x="33" y="17" width="34" height="4" fill="#78350f"/>`,
+    cap:   `<path d="${top}" fill="${c.hair}"/><path d="M31 27 Q31 11 50 11 Q69 11 69 27Z" fill="#78350f"/><path d="M62 24 L84 27 L64 29Z" fill="#78350f"/>`
   }[c.style] || "";
+  const weapon = {
+    sword: `<path d="M72 94 L88 64" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/><path d="M72 94 L88 64" stroke="#94a3b8" stroke-width="1.5"/>
+      <path d="M66 90 L79 97" stroke="#a16207" stroke-width="4" stroke-linecap="round"/>`,
+    magic: `<path d="M71 104 L82 46" stroke="#92400e" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="82.5" cy="43" r="9" fill="#c4b5fd55"/><circle cx="82.5" cy="43" r="5.5" fill="#a78bfa" stroke="#ede9fe" stroke-width="1.5"/>`,
+    beast: `<path d="M72 96 Q86 100 84 112 Q82 120 90 122" stroke="#78350f" stroke-width="2.5" fill="none" stroke-linecap="round"/>`
+  }[c.attack] || "";
   const back = c.style === "long" ? `<path d="M28 34 Q28 14 50 14 Q72 14 72 34 L73 66 L27 66Z" fill="${c.hair}"/>` : "";
   return `<svg class="${cls}" viewBox="0 -12 100 150">
     ${back}
@@ -184,11 +222,29 @@ function person(i, cls = "") {
     <path d="M45 48 Q50 52 55 48" stroke="#7f1d1d" stroke-width="2" fill="none" stroke-linecap="round"/>
     ${hair}
     <g class="arm">
-      <path d="M72 94 L88 64" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/><path d="M72 94 L88 64" stroke="#94a3b8" stroke-width="1.5"/>
-      <path d="M66 90 L79 97" stroke="#a16207" stroke-width="4" stroke-linecap="round"/>
+      ${weapon}
       <rect x="67" y="60" width="10" height="32" rx="5" fill="${c.shirt}" stroke="#0002"/><circle cx="72" cy="94" r="5" fill="${c.skin}"/>
     </g>
   </svg>`;
+}
+
+// 조련사의 늑대
+function wolf(cls = "") {
+  return `<svg class="${cls}" viewBox="0 0 120 80">
+    <path d="M14 40 Q2 30 6 18 Q14 30 24 34Z" fill="#6b7280"/>
+    <ellipse cx="50" cy="44" rx="34" ry="17" fill="#9ca3af"/>
+    <ellipse cx="50" cy="52" rx="24" ry="8" fill="#e5e7eb"/>
+    <rect x="26" y="52" width="8" height="22" rx="3" fill="#6b7280"/><rect x="40" y="54" width="8" height="20" rx="3" fill="#9ca3af"/>
+    <rect x="60" y="54" width="8" height="20" rx="3" fill="#9ca3af"/><rect x="72" y="52" width="8" height="22" rx="3" fill="#6b7280"/>
+    <circle cx="88" cy="30" r="16" fill="#9ca3af"/>
+    <path d="M78 20 L80 2 L90 16Z" fill="#6b7280"/><path d="M92 16 L100 2 L102 22Z" fill="#6b7280"/>
+    <path d="M98 30 L116 36 L100 42Z" fill="#d1d5db"/><circle cx="115" cy="36" r="3" fill="#111"/>
+    <circle cx="92" cy="27" r="2.6" fill="#111"/>
+    <path d="M102 41 L104 46 L106 41" fill="#fff"/>
+  </svg>`;
+}
+function avatar(i, cls = "") {
+  return `<span class="avatar ${cls}">${person(i)}${CHARS[i] && CHARS[i].attack === "beast" ? `<span class="pet">${wolf()}</span>` : ""}</span>`;
 }
 
 // ---------- 처음 메뉴 ----------
@@ -199,8 +255,11 @@ function menu(err = "") {
     <div class="card">
       <label class="field">내 이름</label>
       <input type="text" id="name" maxlength="8" placeholder="이름을 써 주세요" value="${esc(me.name)}">
-      <label class="field">내 캐릭터</label>
-      <div class="chars">${CHARS.map((c, i) => `<button class="${i === me.char ? "on" : ""}" onclick="pickChar(${i})">${person(i)}${c.name}</button>`).join("")}</div>
+      <label class="field">내 캐릭터 <span class="pts">⭐ ${save.points} 포인트</span></label>
+      <div class="chars">${CHARS.map((c, i) => `<button class="${i === me.char ? "on" : ""} ${isOpen(i) ? "" : "locked"}" onclick="pickChar(${i})">
+        ${avatar(i)}${c.name}${isOpen(i) ? "" : `<span class="lock">🔒 ${c.cost}점</span>`}</button>`).join("")}</div>
+      <div class="info">${statLine(me.char)}<br><span class="sub">${CHARS[me.char].info}</span></div>
+      ${notice ? `<div class="notice">${notice}</div>` : ""}
     </div>
     <div class="net" id="net"></div>
     <div class="card">
@@ -228,22 +287,21 @@ function showNet() {
     lib: "🔴 연결 프로그램을 불러오지 못했어요<br><small>인터넷이 연결되어 있는지 확인하고 새로고침해 보세요.</small>"
   }[netState];
 }
-function saveName() { const n = $("name"); if (n) me.name = n.value.trim().slice(0, 8); }
-function pickChar(c) { saveName(); me.char = c; menu(); }
+function saveName() { const n = $("name"); if (n) { me.name = n.value.trim().slice(0, 8); save.name = me.name; saveNow(); } }
+function statLine(i) { const c = CHARS[i]; return `<b>${c.name}</b> · ❤️ ${c.hp} · ⚔️ ${c.atk} · 💚 ${c.heal}`; }
+function pickChar(i) {
+  saveName(); notice = "";
+  const c = CHARS[i];
+  if (!isOpen(i)) {
+    if (save.points < c.cost) { notice = `🔒 ${c.name} 캐릭터는 ${c.cost}점이 필요해요. ${c.cost - save.points}점 더 모아 보세요!`; return menu(); }
+    save.points -= c.cost; save.unlocked.push(i);
+    notice = `🎉 ${c.name} 잠금 해제!`;
+  }
+  me.char = i; save.char = i; saveNow();
+  menu();
+}
 
 // ---------- 방 만들기 설정 ----------
-function slider(key, label, value, unit) {
-  const [min, max, step] = LIMITS[key.split(".")[0] === "uses" ? "uses" : key];
-  return `<label class="field">${label}: <span id="v-${key}">${value}</span>${unit}</label>
-    <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
-      oninput="setOpt('${key}', this.value)">`;
-}
-function setOpt(key, v) {
-  v = Number(v);
-  if (key.startsWith("uses.")) settings.uses[key.slice(5)] = v; else settings[key] = v;
-  $("v-" + key).textContent = v;
-  if (key === "atk") $("v-def").textContent = v;
-}
 function setSize(n) { settings.size = n; createForm(); }
 function createForm() {
   const s = settings;
@@ -252,13 +310,6 @@ function createForm() {
       <h2>⚙️ 방 설정</h2>
       <label class="field">몇 대 몇?</label>
       <div class="row modes">${[1, 2, 3].map(n => `<button class="${s.size === n ? "on" : ""}" onclick="setSize(${n})">${n} 대 ${n}</button>`).join("")}</div>
-      ${slider("hp", "❤️ 최대 체력", s.hp, "")}
-      ${slider("atk", "⚔️ 공격 피해", s.atk, "")}
-      <div class="sub">🛡️ 방어하면 피해가 <b id="v-def">${s.atk}</b> 줄어요</div>
-      ${slider("heal", "💚 회복량", s.heal, "")}
-      ${slider("uses.atk", "⚔️ 공격 횟수", s.uses.atk, "번")}
-      ${slider("uses.def", "🛡️ 방어 횟수", s.uses.def, "번")}
-      ${slider("uses.heal", "💚 회복 횟수", s.uses.heal, "번")}
       <button class="btn" id="makeBtn" onclick="createRoom()">방 만들기 완료</button>
       <button class="btn gray" onclick="menu()">뒤로</button>
       <div class="err" id="err"></div>
@@ -370,7 +421,7 @@ function createRoom() {
 }
 
 function newPlayer(pid, name, char, team, conn) {
-  return { pid, name: name || "이름없음", char, team, hp: 0, left: {}, pick: null, target: null, gone: false, conn };
+  return { pid, name: name || "이름없음", char, team, hp: 0, max: CHARS[char].hp, left: {}, pick: null, target: null, gone: false, conn };
 }
 const P = pid => room.players.find(p => p.pid === pid);
 const active = p => p.hp > 0 && !p.gone;
@@ -383,7 +434,7 @@ function hostHandle(pid, m, conn) {
     if (room.phase !== "lobby") return conn.send({ t: "error", msg: "이미 게임이 시작된 방이에요." });
     if (room.players.length >= room.s.size * 2) return conn.send({ t: "error", msg: "방이 꽉 찼어요." });
     const team = teamCount(0) <= teamCount(1) ? 0 : 1;
-    room.players.push(newPlayer(pid, String(m.name || "").slice(0, 8), CHARS[m.char] ? m.char : 0, team, conn));
+    room.players.push(newPlayer(pid, String(m.name || "").slice(0, 8), CHARS[m.char] ? Number(m.char) : 0, team, conn));
   } else if (!p) {
     return;
   } else if (m.t === "team" && room.phase === "lobby") {
@@ -409,27 +460,27 @@ function hostHandle(pid, m, conn) {
 }
 
 function startGame() {
-  room.phase = "battle"; room.round = 1; room.roundNo = 0; room.events = [];
+  room.phase = "battle"; room.round = 1; room.roundNo = 0; room.events = []; room.game = (room.game || 0) + 1;
   room.total = room.s.uses.atk + room.s.uses.def + room.s.uses.heal;
-  room.players.forEach(p => { p.hp = room.s.hp; p.left = { ...room.s.uses }; p.pick = null; p.target = null; });
+  room.players.forEach(p => { p.max = CHARS[p.char].hp; p.hp = p.max; p.left = { ...room.s.uses }; p.pick = null; p.target = null; });
   sync();
 }
 
 function resolve() {
-  const s = room.s, ev = [];
+  const ev = [];
   const acting = room.players.filter(p => active(p) && p.pick);
   // 1) 회복과 방어
   acting.forEach(p => {
-    if (p.pick === "heal") { const amt = Math.min(s.hp, p.hp + s.heal) - p.hp; p.hp += amt; ev.push({ k: "heal", who: p.pid, amt }); }
+    if (p.pick === "heal") { const amt = Math.min(p.max, p.hp + CHARS[p.char].heal) - p.hp; p.hp += amt; ev.push({ k: "heal", who: p.pid, amt }); }
     if (p.pick === "def") ev.push({ k: "def", who: p.pid });
   });
-  // 2) 공격 (상대가 방어하면 공격 피해만큼 줄어서 막혀요)
+  // 2) 공격 (상대가 방어하면 막혀요. 마법은 방어해도 절반이 들어가요)
   const dmg = {};
   acting.filter(p => p.pick === "atk").forEach(p => {
-    const t = P(p.target);
-    const d = t.pick === "def" ? Math.max(0, s.atk - s.atk) : s.atk;
+    const t = P(p.target), c = CHARS[p.char];
+    const d = t.pick !== "def" ? c.atk : c.attack === "magic" ? Math.ceil(c.atk / 2) : 0;
     dmg[t.pid] = (dmg[t.pid] || 0) + d;
-    ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: d });
+    ev.push({ k: "atk", how: c.attack, who: p.pid, to: t.pid, dmg: d });
   });
   room.players.forEach(p => { p.hp = Math.max(0, p.hp - (dmg[p.pid] || 0)); p.pick = null; p.target = null; });
   room.events = ev; room.roundNo++; room.round++;
@@ -467,8 +518,8 @@ function viewFor(pid) {
   const p = P(pid);
   return {
     me: pid, code: room.code, s: room.s, phase: room.phase, round: room.round, total: room.total,
-    roundNo: room.roundNo, events: room.events, reason: room.reason, totals: room.totals, winner: room.winner,
-    players: room.players.map(q => ({ pid: q.pid, name: q.name, char: q.char, team: q.team, hp: q.hp, picked: !!q.pick, gone: q.gone })),
+    game: room.game, roundNo: room.roundNo, events: room.events, reason: room.reason, totals: room.totals, winner: room.winner,
+    players: room.players.map(q => ({ pid: q.pid, name: q.name, char: q.char, team: q.team, hp: q.hp, max: q.max, picked: !!q.pick, gone: q.gone })),
     myLeft: p.left, myPick: p.pick
   };
 }
@@ -499,6 +550,12 @@ function send(m) { if (isHost) hostHandle("host", m); else pub("host", { ...m, f
 function receive(v) {
   queue = queue.then(() => {
     myPid = v.me;
+    if (v.phase === "over" && awarded !== v.code + v.game) {   // 한 판 끝나면 포인트 받기
+      awarded = v.code + v.game;
+      const myTeam = v.players.find(p => p.pid === myPid).team;
+      earned = v.winner === -1 ? POINTS.draw : v.winner === myTeam ? POINTS.win : POINTS.lose;
+      save.points += earned; saveNow();
+    }
     const animate = v.roundNo > lastRound && v.events.length && view && view.phase === "battle";
     lastRound = v.roundNo;
     if (!animate) { view = v; render(); return; }
@@ -516,14 +573,13 @@ function renderLobby(v) {
   const meP = v.players.find(p => p.pid === myPid);
   const full = [0, 1].every(t => v.players.filter(p => p.team === t).length === v.s.size);
   const team = t => `<div class="team t${t}"><b>${TEAMS[t]}</b> <span class="sub">${v.players.filter(p => p.team === t).length}/${v.s.size}</span>
-    ${v.players.filter(p => p.team === t).map(p => `<div>${person(p.char, "mini")} ${esc(p.name)}${p.pid === "host" ? " 👑" : ""}${p.pid === myPid ? " ⭐" : ""}</div>`).join("")}</div>`;
+    ${v.players.filter(p => p.team === t).map(p => `<div>${person(p.char, "mini")} ${esc(p.name)} <span class="sub">${CHARS[p.char].name}</span>${p.pid === "host" ? " 👑" : ""}${p.pid === myPid ? " ⭐" : ""}</div>`).join("")}</div>`;
   const s = v.s;
   show(`
     <div class="card center">
       <div class="sub">방 코드</div>
       <div class="code">${v.code}</div>
-      <div class="sub">${s.size} 대 ${s.size} · ❤️ ${s.hp} · ⚔️ ${s.atk} · 🛡️ ${s.atk} 막기 · 💚 ${s.heal}<br>
-        횟수: 공격 ${s.uses.atk}번 · 방어 ${s.uses.def}번 · 회복 ${s.uses.heal}번</div>
+      <div class="sub">${s.size} 대 ${s.size} · 공격 ${s.uses.atk}번 · 방어 ${s.uses.def}번 · 회복 ${s.uses.heal}번</div>
     </div>
     <div class="card">
       <div class="teams">${team(0)}${team(1)}</div>
@@ -549,8 +605,9 @@ function fighter(p, v, myTeam, where) {
   const mark = p.gone ? "📴 나감" : p.hp <= 0 ? "💀" : v.phase !== "battle" ? "" : p.picked ? "✅" : "💭";
   return `<div class="fighter ${where} t${p.team} ${enemy ? "enemy" : ""} ${p.hp <= 0 ? "dead" : ""} ${pickable ? "pickable" : ""}"
       data-pid="${p.pid}" ${pickable ? `onclick="attack('${p.pid}')"` : ""}>
-    ${where === "me" ? "" : `<div class="tag">${esc(p.name)}</div>${hpBar(p.hp, v.s.hp)}<div class="hpnum">❤️ ${p.hp}</div>`}
+    ${where === "me" ? "" : `<div class="tag">${esc(p.name)}</div>${hpBar(p.hp, p.max)}<div class="hpnum">❤️ ${p.hp}</div>`}
     <div class="body">${person(p.char)}</div>
+    ${CHARS[p.char].attack === "beast" ? `<div class="pet">${wolf()}</div>` : ""}
     <div class="ready">${mark}</div>
   </div>`;
 }
@@ -571,6 +628,7 @@ function renderBattle(v) {
     panel = `<div class="center"><h2 style="font-size:1.7rem">${win}</h2>
       <div>${who}</div>
       <div class="sub">${v.reason} 남은 체력 ${TEAMS[0]} ${v.totals[0]} : ${v.totals[1]} ${TEAMS[1]}</div>
+      <div class="earned">⭐ +${earned} 포인트 · 모은 포인트 ${save.points}</div>
       ${isHost ? `<button class="btn" onclick="send({t:'again'})">같은 방에서 다시 하기</button>` : `<div class="sub" style="margin-top:8px">방장이 다시 시작하면 같이 할 수 있어요.</div>`}
       <button class="btn gray" onclick="menu()">처음 메뉴로</button></div>`;
   } else if (meP.hp <= 0) {
@@ -595,8 +653,8 @@ function renderBattle(v) {
     </div>
     <div class="card status t${myTeam}">
       <div style="display:flex;justify-content:space-between;font-weight:bold">
-        <span>${esc(meP.name)} · 내 상태</span><span>❤️ ${meP.hp} / ${v.s.hp}</span></div>
-      <div style="margin-top:6px">${hpBar(meP.hp, v.s.hp)}</div>
+        <span>${esc(meP.name)} · ${CHARS[meP.char].name} <span class="sub">⚔️ ${CHARS[meP.char].atk} 💚 ${CHARS[meP.char].heal}</span></span><span>❤️ ${meP.hp} / ${meP.max}</span></div>
+      <div style="margin-top:6px">${hpBar(meP.hp, meP.max)}</div>
       ${panel}
     </div>`);
 }
@@ -619,6 +677,29 @@ function floatText(f, text, cls) {
   s.className = "float " + cls; s.textContent = text;
   f.appendChild(s);
 }
+const center = n => { const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; };
+function fly(from, to, cls, ms) {   // 마법 구슬이 날아가요
+  if (!from || !to) return;
+  const a = center(from), b = center(to);
+  const o = document.createElement("div");
+  o.className = cls; document.body.appendChild(o);
+  o.animate([{ transform: `translate(${a.x}px, ${a.y - a.w * .4}px) scale(.4)` }, { transform: `translate(${b.x}px, ${b.y}px) scale(1.2)` }],
+    { duration: ms, easing: "ease-in" }).onfinish = () => o.remove();
+}
+function burst(to) {   // 마법이 맞은 곳에서 펑!
+  if (!to) return;
+  const b = center(to), o = document.createElement("div");
+  o.className = "orb"; document.body.appendChild(o);
+  o.animate([{ transform: `translate(${b.x}px, ${b.y}px) scale(1)`, opacity: 1 }, { transform: `translate(${b.x}px, ${b.y}px) scale(4)`, opacity: 0 }],
+    { duration: 500 }).onfinish = () => o.remove();
+}
+function dash(pet, to) {   // 늑대가 달려가서 물고 돌아와요
+  if (!to) return;
+  const a = center(pet), b = center(to);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  pet.animate([{ transform: "none" }, { transform: `translate(${dx}px, ${dy}px) scale(1.4)`, offset: .5 }, { transform: `translate(${dx * .9}px, ${dy * .9}px) scale(1.4)`, offset: .65 }, { transform: "none" }],
+    { duration: 1000, easing: "ease-in-out" });
+}
 async function playEvents(ev) {
   ev.forEach(e => {
     const f = el(e.who);
@@ -628,14 +709,24 @@ async function playEvents(ev) {
   });
   await wait(350);
   const myTeam = view.players.find(p => p.pid === myPid).team;
-  ev.filter(e => e.k === "atk").forEach(e => {
+  const atks = ev.filter(e => e.k === "atk");
+  atks.forEach(e => {
     const a = el(e.who), t = el(e.to);
-    const attacker = view.players.find(p => p.pid === e.who);
-    if (a) a.classList.add(attacker.team === myTeam ? "anim-up" : "anim-down");
-    if (t && e.dmg > 0) { t.classList.add("anim-hit"); floatText(t, "-" + e.dmg, "dmg"); }
-    if (t && e.dmg === 0) floatText(t, "막음!", "block");
+    if (!a || !t) return;
+    const mine = view.players.find(p => p.pid === e.who).team === myTeam;
+    if (e.how === "magic") { a.classList.add("anim-cast"); fly(a.querySelector(".body"), t.querySelector(".body"), "orb", 450); }
+    else if (e.how === "beast") { const pet = a.querySelector(".pet"); if (pet) dash(pet, t.querySelector(".body")); }
+    else a.classList.add(mine ? "anim-up" : "anim-down");
   });
-  await wait(1100);
+  await wait(420);
+  atks.forEach(e => {
+    const t = el(e.to);
+    if (!t) return;
+    if (e.dmg > 0) { t.classList.add("anim-hit"); floatText(t, "-" + e.dmg, "dmg"); }
+    else floatText(t, "막음!", "block");
+    if (e.how === "magic") burst(t.querySelector(".body"));
+  });
+  await wait(900);
 }
 
 connectBrokers();
