@@ -28,7 +28,13 @@ const CHARS = [
 const TEAMS = ["🔴 빨강팀", "🔵 파랑팀"];
 const ROOM_PREFIX = "vibe03-battle/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
 // 친구들과 연결해 주는 무료 공개 서버 (둘 다 미리 연결해 두고 먼저 되는 쪽을 써요)
-const BROKERS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"];
+// 앞의 두 곳은 일반 https 포트(443)를 써서 학교 인터넷에서도 잘 막히지 않아요
+const BROKERS = [
+  { url: "wss://mqtt.eclipseprojects.io/mqtt" },
+  { url: "wss://public.cloud.shiftr.io", username: "public", password: "public" },
+  { url: "wss://broker.emqx.io:8084/mqtt" },
+  { url: "wss://broker.hivemq.com:8884/mqtt" }
+];
 // ===============================
 </script>
 <style>
@@ -63,6 +69,9 @@ const BROKERS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884
   .team.t0 { border-color: var(--t0); background: #fef2f2; }
   .team.t1 { border-color: var(--t1); background: #eff6ff; }
   .team div { padding: 3px 0; }
+  .net { text-align: center; font-weight: bold; padding: 8px; border-radius: 10px; margin-bottom: 12px; background: #fef9c3; }
+  .net.ok { background: #dcfce7; color: #166534; } .net.fail, .net.lib { background: #fee2e2; color: #991b1b; }
+  .net small { font-weight: normal; }
   .err { color: #b91c1c; font-weight: bold; min-height: 1.3em; margin-top: 8px; text-align: center; }
 
   /* 싸움터: 위쪽(멀리)은 상대, 아래쪽(가까이)은 우리 편 */
@@ -193,6 +202,7 @@ function menu(err = "") {
       <label class="field">내 캐릭터</label>
       <div class="chars">${CHARS.map((c, i) => `<button class="${i === me.char ? "on" : ""}" onclick="pickChar(${i})">${person(i)}${c.name}</button>`).join("")}</div>
     </div>
+    <div class="net" id="net"></div>
     <div class="card">
       <h2>🚪 방 코드로 들어가기</h2>
       <div class="row">
@@ -205,6 +215,18 @@ function menu(err = "") {
       <button class="btn" onclick="saveName(); createForm()">방 만들기</button>
     </div>
     <div class="err">${esc(err)}</div>`);
+  showNet();
+}
+function showNet() {
+  const el = $("net");
+  if (!el) return;
+  el.className = "net " + netState;
+  el.innerHTML = {
+    wait: "🟡 서버에 연결하는 중...",
+    ok: "🟢 서버 연결됨",
+    fail: "🔴 서버에 연결할 수 없어요<br><small>학교·회사 인터넷에서 막혔을 수 있어요. 휴대폰 데이터로 해 보세요.</small>",
+    lib: "🔴 연결 프로그램을 불러오지 못했어요<br><small>인터넷이 연결되어 있는지 확인하고 새로고침해 보세요.</small>"
+  }[netState];
 }
 function saveName() { const n = $("name"); if (n) me.name = n.value.trim().slice(0, 8); }
 function pickChar(c) { saveName(); me.char = c; menu(); }
@@ -248,13 +270,22 @@ function createForm() {
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const myId = Math.random().toString(36).slice(2, 10);
 const URLS = window.BROKER_TEST || BROKERS;   // BROKER_TEST는 테스트할 때만 써요
-let brokers = [], waiters = [];
+let brokers = [], waiters = [], netState = "wait";   // wait 연결 중 · ok 연결됨 · fail 서버 막힘 · lib 프로그램 못 불러옴
 function connectBrokers() {
-  brokers = URLS.map((url, i) => {
+  if (typeof mqtt === "undefined") {   // 첫 번째 주소에서 못 불러오면 다른 주소에서 한 번 더
+    const sc = document.createElement("script");
+    sc.src = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
+    sc.onload = connectBrokers;
+    sc.onerror = () => { netState = "lib"; showNet(); };
+    document.head.appendChild(sc);
+    return;
+  }
+  setTimeout(() => { if (netState === "wait") { netState = "fail"; showNet(); } }, 12000);
+  brokers = URLS.map((o, i) => {
     const b = { ready: false };
-    b.client = mqtt.connect(url, { clientId: "vb" + myId + i, connectTimeout: 8000, reconnectPeriod: 2000 });
-    b.client.on("connect", () => { b.ready = true; waiters = waiters.filter(w => !w()); });
-    b.client.on("close", () => { b.ready = false; });
+    b.client = mqtt.connect(o.url, { clientId: "vb" + myId + i, username: o.username, password: o.password, connectTimeout: 10000, reconnectPeriod: 3000 });
+    b.client.on("connect", () => { b.ready = true; netState = "ok"; showNet(); waiters = waiters.filter(w => !w()); });
+    b.client.on("close", () => { b.ready = false; if (!brokers.some(x => x.ready) && netState === "ok") { netState = "wait"; showNet(); } });
     b.client.on("message", (topic, buf) => onMessage(i, topic, buf));
     return b;
   });
@@ -335,7 +366,7 @@ function createRoom() {
     room = { code, s: JSON.parse(JSON.stringify(settings)), phase: "lobby", round: 0, roundNo: 0, events: [], players: [] };
     room.players.push(newPlayer("host", me.name, me.char, 0, null));
     enterRoom(b, code, "host", sync);
-  }, () => menu("서버에 연결할 수 없어요. 인터넷 연결을 확인해 주세요."));
+  }, () => menu("서버에 연결할 수 없어요. 학교·회사 인터넷에서 막혔을 수 있어요."));
 }
 
 function newPlayer(pid, name, char, team, conn) {
@@ -459,7 +490,7 @@ function joinRoom() {
       net.joinTimer = setTimeout(() => menu("그런 방이 없어요. 방 코드를 확인해 주세요."), 6000);
       pub("host", { t: "join", from: myId, name: me.name, char: me.char });
     });
-  }, () => menu("서버에 연결할 수 없어요. 인터넷 연결을 확인해 주세요."));
+  }, () => menu("서버에 연결할 수 없어요. 학교·회사 인터넷에서 막혔을 수 있어요."));
 }
 
 function send(m) { if (isHost) hostHandle("host", m); else pub("host", { ...m, from: myId }); }
