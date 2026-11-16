@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>공격 방어 회복 대결</title>
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
 // ===== 여기만 고치면 돼요 =====
 const USES = { atk: 5, def: 5, heal: 5 };   // 공격 · 방어 · 회복 각각 쓸 수 있는 횟수
@@ -83,6 +84,8 @@ const BROKERS = [
   .net { text-align: center; font-weight: bold; padding: 8px; border-radius: 10px; margin-bottom: 12px; background: #fef9c3; }
   .net.ok { background: #dcfce7; color: #166534; } .net.fail, .net.lib { background: #fee2e2; color: #991b1b; }
   .net small { font-weight: normal; }
+  .qr { margin: 10px auto 4px; width: 180px; }
+  .qr svg { width: 180px; height: 180px; display: block; }
   .err { color: #b91c1c; font-weight: bold; min-height: 1.3em; margin-top: 8px; text-align: center; }
 
   /* 싸움터: 위쪽(멀리)은 상대, 아래쪽(가까이)은 우리 편 */
@@ -188,6 +191,16 @@ me.char = isOpen(save.char) ? save.char : 0;
 me.name = save.name || "";
 let awarded = "", earned = 0, notice = "";
 
+// QR로 들어오면 주소에 방 코드가 붙어 있어요 (…battle.html?code=AB12)
+let joinCode = (new URLSearchParams(location.search).get("code") || "").toUpperCase().slice(0, 4);
+if (joinCode) { notice = `📷 방 ${joinCode}에 들어가려면 캐릭터를 고르고 '들어가기'를 누르세요`; try { history.replaceState(null, "", location.pathname); } catch (e) {} }
+function roomLink(code) { return location.href.split(/[?#]/)[0] + "?code=" + code; }
+function qrImage(text) {
+  if (typeof qrcode === "undefined") return "";   // QR 프로그램을 못 불러오면 코드만 보여줘요
+  const q = qrcode(0, "M"); q.addData(text); q.make();
+  return q.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+}
+
 // ---------- 사람 캐릭터 그리기 ----------
 function person(i, cls = "") {
   const c = CHARS[i] || CHARS[0];
@@ -265,7 +278,7 @@ function menu(err = "") {
     <div class="card">
       <h2>🚪 방 코드로 들어가기</h2>
       <div class="row">
-        <input type="text" id="code" maxlength="4" placeholder="방 코드 4자리" style="text-transform:uppercase">
+        <input type="text" id="code" maxlength="4" placeholder="방 코드 4자리" style="text-transform:uppercase" value="${esc(joinCode)}">
         <button class="btn" style="margin:0;flex:0 0 110px" onclick="joinRoom()">들어가기</button>
       </div>
     </div>
@@ -532,6 +545,7 @@ function sync() {
 function joinRoom() {
   saveName();
   const code = $("code").value.trim().toUpperCase();
+  joinCode = ""; notice = "";
   if (code.length !== 4) return menu("방 코드 4자리를 써 주세요.");
   show(`<div class="card center"><h2>🔌 방 ${esc(code)}에 들어가는 중...</h2></div>`);
   const b = brokerOf(code);
@@ -579,6 +593,7 @@ function renderLobby(v) {
     <div class="card center">
       <div class="sub">방 코드</div>
       <div class="code">${v.code}</div>
+      ${v.phase === "lobby" ? `<div class="qr">${qrImage(roomLink(v.code))}</div><div class="sub">휴대폰 카메라로 찍으면 바로 들어올 수 있어요</div>` : ""}
       <div class="sub">${s.size} 대 ${s.size} · 공격 ${s.uses.atk}번 · 방어 ${s.uses.def}번 · 회복 ${s.uses.heal}번</div>
     </div>
     <div class="card">
