@@ -9,15 +9,17 @@
 <script>
 // ===== 여기만 고치면 돼요 =====
 // 처음 능력치 (모두 똑같이 시작해요)
-const BASE = { hp: 100, atk: 15, def: 10, heal: 10 };
+const BASE = { hp: 100, atk: 15, def: 10, heal: 30 };
 // 스탯 포인트 1개를 찍으면 오르는 양
-const STAT_UP = { hp: 15, atk: 4, def: 4, heal: 4 };
+const STAT_UP = { hp: 15, atk: 4, def: 4, heal: 12 };
 const START_POINTS = 5;   // 캐릭터 꾸밀 때 받는 스탯 포인트
 const ROUND_POINTS = 1;   // 라운드가 끝날 때마다 받는 스탯 포인트
-// 가위바위보처럼 서로 이기고 져요. 공격 · 방어 · 회복은 횟수 제한 없이 쓸 수 있어요.
-//   🛡️ 방어 > ⚔️ 공격 : 공격을 완전히 막고 방어력만큼 반격해요
-//   ⚔️ 공격 > 💚 회복 : 회복하다 공격받으면 회복이 실패해요
-//   💚 회복 > 🛡️ 방어 : 상대가 방어하는 동안 마음 놓고 회복해요
+const HEAVY = 1.5;        // 강공격 피해 = 공격력 × 이 값
+// 서로 물고 물리는 삼각형이에요. 모든 행동은 횟수 제한 없이 쓸 수 있어요.
+//   🛡️ 방어 > ⚔️ 공격   : 공격을 완전히 막고 반격 스탯만큼 되돌려 줘요
+//   ⚔️ 공격 > 💥 강공격 : 강공격은 느려서 빠른 공격에 맞으면 끊겨요
+//   💥 강공격 > 🛡️ 방어 : 방어를 깨고 큰 피해를 줘요 (반격도 못 해요)
+//   💚 회복 : 공격이나 강공격을 맞으면 실패해요. 상대가 방어할 때는 안전해요
 
 // 캐릭터 꾸미기에서 고를 수 있는 것들
 const LOOK = {
@@ -133,6 +135,9 @@ const BROKERS = [
   .acts button small { display: block; font-weight: normal; font-size: .8rem; opacity: .9; }
   .rps { margin-top: 8px; text-align: center; font-size: .75rem; color: var(--sub); }
   .acts .cancel { grid-column: 1 / -1; min-height: 44px; }
+  .acts.four { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .acts.four button { font-size: .95rem; padding: 10px 2px; }
+  .heavy { background: #b91c1c; }
   .atk { background: #ea580c; } .def { background: #0891b2; } .heal { background: #16a34a; } .cancel { background: #64748b; }
 
   /* 모션 */
@@ -143,6 +148,7 @@ const BROKERS = [
     background: radial-gradient(circle, #fff 0%, #c4b5fd 35%, #8b5cf6 65%, #8b5cf600 72%); box-shadow: 0 0 18px 6px #a78bfa; }
   .anim-up .body, .anim-down .body { animation: lunge .7s; }
   .anim-up .body { --dy: -40px; } .anim-down .body { --dy: 30px; }
+  .anim-up.big .body { --dy: -70px; } .anim-down.big .body { --dy: 50px; }
   .fighter.enemy.anim-down .body { animation: lungeFlip .7s; }
   .anim-up .arm, .anim-down .arm { animation: swing .7s; }
   .anim-hit .body { animation: shake .5s; filter: drop-shadow(0 0 12px #ef4444); }
@@ -172,9 +178,10 @@ const BROKERS = [
 </div>
 <script>
 const ACTS = {
-  atk:  { label: "⚔️ 공격", cls: "atk" },
-  def:  { label: "🛡️ 방어", cls: "def" },
-  heal: { label: "💚 회복", cls: "heal" }
+  atk:   { label: "⚔️ 공격", cls: "atk" },
+  heavy: { label: "💥 강공격", cls: "heavy" },
+  def:   { label: "🛡️ 방어", cls: "def" },
+  heal:  { label: "💚 회복", cls: "heal" }
 };
 const STATS = {
   hp:   { label: "❤️ 체력" },
@@ -471,7 +478,7 @@ function hostHandle(pid, m, conn) {
   } else if (m.t === "pick" && room.phase === "battle") {
     if (!active(p) || p.pick || !ACTS[m.act]) return;
     let target = null;
-    if (m.act === "atk") {
+    if (m.act === "atk" || m.act === "heavy") {
       const foes = room.players.filter(q => q.team !== p.team && active(q));
       target = foes.length === 1 ? foes[0].pid : m.target;
       if (!foes.some(q => q.pid === target)) return;
@@ -492,27 +499,38 @@ function startBattle() {
 function resolve() {
   const ev = [];
   const acting = room.players.filter(p => active(p) && p.pick);
-  const attackers = acting.filter(p => p.pick === "atk");
-  const attacked = new Set(attackers.map(p => p.target));
-  // 1) 회복 (공격받으면 실패) 과 방어
+  const fast = acting.filter(p => p.pick === "atk");
+  // 1) 강공격은 느려서, 강공격하는 사람을 누가 공격하면 끊겨요
+  const heavy = acting.filter(p => p.pick === "heavy").filter(p => {
+    if (fast.some(q => q.target === p.pid)) { ev.push({ k: "cut", who: p.pid }); return false; }
+    return true;
+  });
+  const hitters = [...fast, ...heavy];
+  const attacked = new Set(hitters.map(p => p.target));
+  const broken = new Set(heavy.map(p => p.target).filter(pid => P(pid).pick === "def"));   // 방어가 깨진 사람
+  // 2) 회복 (맞으면 실패) 과 방어
   acting.forEach(p => {
     if (p.pick === "heal") {
       if (attacked.has(p.pid)) { ev.push({ k: "heal", who: p.pid, amt: 0, fail: true }); return; }
       const amt = Math.min(p.st.hp, p.hp + p.st.heal) - p.hp; p.hp += amt;
       ev.push({ k: "heal", who: p.pid, amt });
     }
-    if (p.pick === "def") ev.push({ k: "def", who: p.pid });
+    if (p.pick === "def") ev.push({ k: "def", who: p.pid, broken: broken.has(p.pid) });
   });
-  // 2) 공격 (상대가 방어하면 완전히 막히고, 방어력만큼 반격을 받아요)
+  // 3) 공격과 강공격
   const dmg = {};
   const hurt = (pid, d) => { dmg[pid] = (dmg[pid] || 0) + d; };
-  attackers.forEach(p => {
-    const t = P(p.target);
-    if (t.pick === "def") { hurt(p.pid, t.st.def); ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: 0, counter: t.st.def }); }
-    else { hurt(t.pid, p.st.atk); ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: p.st.atk }); }
+  hitters.forEach(p => {
+    const t = P(p.target), isHeavy = p.pick === "heavy";
+    const power = isHeavy ? Math.round(p.st.atk * HEAVY) : p.st.atk;
+    if (t.pick === "def" && !broken.has(t.pid)) {   // 막히고 반격받아요
+      hurt(p.pid, t.st.def); ev.push({ k: "atk", heavy: isHeavy, who: p.pid, to: t.pid, dmg: 0, counter: t.st.def });
+    } else {
+      hurt(t.pid, power); ev.push({ k: "atk", heavy: isHeavy, who: p.pid, to: t.pid, dmg: power, broke: isHeavy && t.pick === "def" });
+    }
   });
   room.players.forEach(p => { p.hp = Math.max(0, p.hp - (dmg[p.pid] || 0)); p.pick = null; p.target = null; });
-  // 3) 라운드가 끝나면 살아 있는 사람은 스탯 포인트를 받아요
+  // 4) 라운드가 끝나면 살아 있는 사람은 스탯 포인트를 받아요
   room.players.forEach(p => { if (active(p)) p.pts += ROUND_POINTS; });
   room.events = ev; room.roundNo++; room.round++;
   checkEnd();
@@ -653,7 +671,7 @@ function renderCustom(v) {
     </div>
     <div class="card">
       <h2>📈 처음 스탯 찍기</h2>
-      <div class="sub">🛡️ 방어하면 공격을 완전히 막고, 반격 스탯만큼 되돌려 줘요.<br>⚔️ 공격은 회복을 끊고, 💚 회복은 상대가 방어할 때 안전해요.</div>
+      <div class="sub">🛡️ 방어는 ⚔️ 공격을 막고 반격해요. ⚔️ 공격은 느린 💥 강공격을 끊어요.<br>💥 강공격은 🛡️ 방어를 깨요. 💚 회복은 맞으면 실패해요.</div>
       <div class="ptsbar"><span class="left">⭐ 남은 포인트 ${START_POINTS - used}</span>
         <button class="linkbtn" onclick="draft.alloc={hp:0,atk:0,def:0,heal:0};render()">다시 찍기</button></div>
       <div class="stats">${Object.entries(STATS).map(([k, s]) =>
@@ -711,15 +729,16 @@ function renderBattle(v) {
     panel = `<div class="center"><h2>✅ ${ACTS[v.myPick].label}!</h2>
       <div class="sub">다른 사람을 기다리는 중... ${waiting.filter(p => p.picked).length}/${waiting.length}</div></div>`;
   } else if (choosingTarget) {
-    panel = `<div class="center"><b>누구를 공격할까요? 🎯</b></div><div class="acts">
-      ${aliveFoes.map(p => `<button class="atk" onclick="attack('${p.pid}')">🎯 ${esc(p.name)}<small>❤️ ${p.hp}</small></button>`).join("")}
+    panel = `<div class="center"><b>누구에게 ${ACTS[choosingTarget].label}? 🎯</b></div><div class="acts">
+      ${aliveFoes.map(p => `<button class="${ACTS[choosingTarget].cls}" onclick="attack('${p.pid}')">🎯 ${esc(p.name)}<small>❤️ ${p.hp}</small></button>`).join("")}
       <button class="cancel" onclick="choosingTarget=false;render()">취소</button></div>`;
   } else {
-    panel = `<div class="acts">
+    panel = `<div class="acts four">
       <button class="atk" onclick="choose('atk')">${ACTS.atk.label}<small>피해 ${st.atk}</small></button>
+      <button class="heavy" onclick="choose('heavy')">${ACTS.heavy.label}<small>방어 깨기 ${Math.round(st.atk * HEAVY)}</small></button>
       <button class="def" onclick="choose('def')">${ACTS.def.label}<small>막고 반격 ${st.def}</small></button>
       <button class="heal" onclick="choose('heal')">${ACTS.heal.label}<small>+${st.heal}</small></button></div>
-      <div class="rps">🛡️방어는 ⚔️공격을 막고 반격 · ⚔️공격은 💚회복을 끊어요 · 💚회복은 🛡️방어할 때 안전</div>`;
+      <div class="rps">🛡️방어 ▶ ⚔️공격 ▶ 💥강공격 ▶ 🛡️방어<br>💚회복은 맞으면 실패</div>`;
   }
   // 라운드가 지나면 받은 스탯 포인트를 찍어요
   const levelup = v.phase === "battle" && alive && v.myPts > 0 ? `
@@ -750,13 +769,15 @@ function statUp(key) {
   render(); send({ t: "stat", key });
 }
 function picked(m) { view.myPick = m.act; choosingTarget = false; render(); send(m); }
+// choosingTarget: 대상을 고르는 중인 행동 (atk 또는 heavy), 아니면 false
 function choose(act) {
-  if (act !== "atk") return picked({ t: "pick", act });
+  if (act !== "atk" && act !== "heavy") return picked({ t: "pick", act });
   const foes = view.players.filter(p => p.team !== view.players.find(q => q.pid === myPid).team && p.hp > 0 && !p.gone);
+  choosingTarget = act;
   if (foes.length === 1) return attack(foes[0].pid);
-  choosingTarget = true; render();
+  render();
 }
-function attack(target) { picked({ t: "pick", act: "atk", target }); }
+function attack(target) { picked({ t: "pick", act: choosingTarget || "atk", target }); }
 
 // ---------- 모션 ----------
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -769,14 +790,14 @@ function floatText(f, text, cls) {
 }
 // 마법 구슬: 지팡이 끝에서 상대에게 날아가요
 const center = n => { const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, r }; };
-function fly(from, to) {
+function fly(from, to, big) {
   if (!from || !to) return;
   const a = center(from), b = center(to);
   const flipped = from.closest(".enemy");
   const sx = flipped ? a.r.left + a.w * .16 : a.r.right - a.w * .16, sy = a.r.top + a.h * .2;
   const o = document.createElement("div");
   o.className = "orb"; document.body.appendChild(o);
-  o.animate([{ transform: `translate(${sx}px, ${sy}px) scale(.5)` }, { transform: `translate(${b.x}px, ${b.y}px) scale(1.2)` }],
+  o.animate([{ transform: `translate(${sx}px, ${sy}px) scale(.5)` }, { transform: `translate(${b.x}px, ${b.y}px) scale(${big ? 2 : 1.2})` }],
     { duration: 330, easing: "ease-in", fill: "forwards" }).onfinish = () => o.remove();
 }
 function burst(to) {
@@ -792,6 +813,7 @@ async function playEvents(ev) {
     if (!f) return;
     if (e.k === "heal" && !e.fail) { f.classList.add("anim-heal"); floatText(f, e.amt > 0 ? "+" + e.amt : "체력 가득!", "heal"); }
     if (e.k === "def") { const s = document.createElement("span"); s.className = "shield"; s.textContent = "🛡️"; f.appendChild(s); }
+    if (e.k === "cut") floatText(f, "강공격 끊김!", "block");
   });
   await wait(350);
   const myTeam = view.players.find(p => p.pid === myPid).team;
@@ -800,7 +822,8 @@ async function playEvents(ev) {
     const a = el(e.who), t = el(e.to);
     const who = view.players.find(p => p.pid === e.who);
     if (!a) return;
-    if (LOOK.weapon[cleanLook(who.look).weapon] === "staff") { a.classList.add("anim-cast"); fly(a.querySelector(".body"), t && t.querySelector(".body")); }
+    if (e.heavy) a.classList.add("big");
+    if (LOOK.weapon[cleanLook(who.look).weapon] === "staff") { a.classList.add("anim-cast"); fly(a.querySelector(".body"), t && t.querySelector(".body"), e.heavy); }
     else a.classList.add(who.team === myTeam ? "anim-up" : "anim-down");
   });
   await wait(330);
@@ -813,6 +836,7 @@ async function playEvents(ev) {
     if (!t) return;
     if (e.dmg > 0) {
       t.classList.add("anim-hit"); floatText(t, "-" + e.dmg, "dmg");
+      if (e.broke) setTimeout(() => floatText(t, "방어 깨기!", "block"), 350);
       if (ev.some(x => x.k === "heal" && x.fail && x.who === e.to)) setTimeout(() => floatText(t, "회복 실패!", "block"), 350);
     } else floatText(t, "막음!", "block");
   });
