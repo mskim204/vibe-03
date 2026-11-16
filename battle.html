@@ -14,7 +14,10 @@ const BASE = { hp: 100, atk: 15, def: 10, heal: 10 };
 const STAT_UP = { hp: 15, atk: 4, def: 4, heal: 4 };
 const START_POINTS = 5;   // 캐릭터 꾸밀 때 받는 스탯 포인트
 const ROUND_POINTS = 1;   // 라운드가 끝날 때마다 받는 스탯 포인트
-// 방어하면 받는 피해가 방어력만큼 줄어요. 공격 · 방어 · 회복은 횟수 제한 없이 쓸 수 있어요.
+// 가위바위보처럼 서로 이기고 져요. 공격 · 방어 · 회복은 횟수 제한 없이 쓸 수 있어요.
+//   🛡️ 방어 > ⚔️ 공격 : 공격을 완전히 막고 방어력만큼 반격해요
+//   ⚔️ 공격 > 💚 회복 : 회복하다 공격받으면 회복이 실패해요
+//   💚 회복 > 🛡️ 방어 : 상대가 방어하는 동안 마음 놓고 회복해요
 
 // 캐릭터 꾸미기에서 고를 수 있는 것들
 const LOOK = {
@@ -23,10 +26,10 @@ const LOOK = {
   style:  ["short", "spiky", "long", "cap", "band"],
   shirt:  ["#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#0891b2", "#2563eb", "#7c3aed", "#ec4899", "#94a3b8", "#1f2937"],
   pants:  ["#334155", "#1e3a8a", "#7f1d1d", "#57534e", "#111827", "#166534"],
-  weapon: ["sword", "axe", "hammer"]
+  weapon: ["sword", "axe", "hammer", "staff"]
 };
 const STYLE_NAMES = { short: "짧은 머리", spiky: "삐죽 머리", long: "긴 머리", cap: "모자", band: "머리띠" };
-const WEAPON_NAMES = { sword: "칼", axe: "도끼", hammer: "망치" };
+const WEAPON_NAMES = { sword: "칼", axe: "도끼", hammer: "망치", staff: "지팡이" };   // 지팡이는 마법 구슬을 날려요
 const TEAMS = ["🔴 빨강팀", "🔵 파랑팀"];
 const ROOM_PREFIX = "vibe03-battle/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
 // 친구들과 연결해 주는 무료 공개 서버 (모두 미리 연결해 두고 먼저 되는 쪽을 써요)
@@ -128,11 +131,16 @@ const BROKERS = [
   .acts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
   .acts button { padding: 10px 4px; min-height: 66px; font-size: 1.05rem; font-weight: bold; border: 0; border-radius: 12px; cursor: pointer; color: #fff; line-height: 1.3; }
   .acts button small { display: block; font-weight: normal; font-size: .8rem; opacity: .9; }
+  .rps { margin-top: 8px; text-align: center; font-size: .75rem; color: var(--sub); }
   .acts .cancel { grid-column: 1 / -1; min-height: 44px; }
   .atk { background: #ea580c; } .def { background: #0891b2; } .heal { background: #16a34a; } .cancel { background: #64748b; }
 
   /* 모션 */
-  .arm { transform-box: fill-box; transform-origin: 50% 8%; }
+  .arm { transform-box: view-box; transform-origin: 72px 64px; }
+  .anim-cast .arm { animation: cast .9s; }
+  @keyframes cast { 25%, 70% { transform: rotate(-35deg); } }
+  .orb { position: fixed; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; pointer-events: none; z-index: 10;
+    background: radial-gradient(circle, #fff 0%, #c4b5fd 35%, #8b5cf6 65%, #8b5cf600 72%); box-shadow: 0 0 18px 6px #a78bfa; }
   .anim-up .body, .anim-down .body { animation: lunge .7s; }
   .anim-up .body { --dy: -40px; } .anim-down .body { --dy: 30px; }
   .fighter.enemy.anim-down .body { animation: lungeFlip .7s; }
@@ -148,7 +156,7 @@ const BROKERS = [
   .float.dmg { color: #dc2626; } .float.heal { color: #15803d; } .float.block { color: #0e7490; }
   @keyframes lunge { 40% { transform: translateY(var(--dy)) scale(1.12); } }
   @keyframes lungeFlip { 0%, 100% { transform: scaleX(-1); } 40% { transform: scaleX(-1) translateY(var(--dy)) scale(1.15); } }
-  @keyframes swing { 30% { transform: rotate(-150deg); } 55% { transform: rotate(20deg); } }
+  @keyframes swing { 30% { transform: rotate(-45deg); } 60% { transform: rotate(75deg); } }
   @keyframes shake { 20% { transform: translateX(-10px); } 40% { transform: translateX(10px); } 60% { transform: translateX(-8px); } 80% { transform: translateX(8px); } }
   @keyframes shakeFlip { 0%, 100% { transform: scaleX(-1); } 20% { transform: scaleX(-1) translateX(-8px); } 40% { transform: scaleX(-1) translateX(8px); } 60% { transform: scaleX(-1) translateX(-6px); } 80% { transform: scaleX(-1) translateX(6px); } }
   @keyframes glow { 50% { transform: scale(1.1); } }
@@ -171,7 +179,7 @@ const ACTS = {
 const STATS = {
   hp:   { label: "❤️ 체력" },
   atk:  { label: "⚔️ 공격" },
-  def:  { label: "🛡️ 방어" },
+  def:  { label: "🛡️ 반격" },
   heal: { label: "💚 회복" }
 };
 const $ = id => document.getElementById(id);
@@ -223,19 +231,30 @@ function person(look, cls = "") {
     band:  `<path d="${top}" fill="${hairC}"/><rect x="30" y="25" width="40" height="6" rx="2" fill="${shirt}" stroke="#0003"/><path d="M70 27 L80 22 L79 32Z" fill="${shirt}"/>`
   }[style];
   const back = style === "long" ? `<path d="M28 34 Q28 14 50 14 Q72 14 72 34 L73 66 L27 66Z" fill="${hairC}"/>` : "";
+  // 무기는 오른손(84, 91)에 세워서 쥐어요
   const tool = {
-    sword:  `<path d="M72 94 L88 64" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/><path d="M72 94 L88 64" stroke="#94a3b8" stroke-width="1.5"/>
-      <path d="M66 90 L79 97" stroke="#a16207" stroke-width="4" stroke-linecap="round"/>`,
-    axe:    `<path d="M72 98 L86 60" stroke="#92400e" stroke-width="4" stroke-linecap="round"/>
-      <path d="M82 58 Q98 52 98 70 Q90 66 84 70Z" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5"/>`,
-    hammer: `<path d="M72 98 L84 62" stroke="#92400e" stroke-width="4" stroke-linecap="round"/>
-      <path d="M74 58 L90 52 L95 64 L79 70Z" fill="#475569" stroke="#1e293b" stroke-width="1.5"/>`
+    sword:  `<path d="M80.5 82 L80.5 34 L84 25 L87.5 34 L87.5 82Z" fill="#e5e7eb" stroke="#64748b" stroke-width="1.2"/>
+      <path d="M84 32 L84 80" stroke="#cbd5e1" stroke-width="1.2"/>
+      <rect x="75" y="81" width="18" height="4.5" rx="2" fill="#ca8a04" stroke="#854d0e"/>
+      <rect x="82" y="85" width="4" height="13" fill="#78350f"/><circle cx="84" cy="100" r="2.8" fill="#ca8a04"/>`,
+    axe:    `<rect x="82" y="40" width="4" height="66" rx="2" fill="#92400e" stroke="#78350f"/>
+      <path d="M82 47 L75 49 L75 58 L82 60Z" fill="#94a3b8" stroke="#475569"/>
+      <path d="M86 43 Q101 38 101 54 Q101 70 86 65Z" fill="#cbd5e1" stroke="#475569" stroke-width="1.5"/>
+      <path d="M98.5 45 Q101.5 54 98.5 63" stroke="#f8fafc" stroke-width="1.5" fill="none"/>`,
+    hammer: `<rect x="82" y="46" width="4" height="60" rx="2" fill="#92400e" stroke="#78350f"/>
+      <rect x="70" y="33" width="28" height="15" rx="3" fill="#64748b" stroke="#1e293b" stroke-width="1.5"/>
+      <rect x="70" y="33" width="5" height="15" rx="2" fill="#475569"/><rect x="93" y="33" width="5" height="15" rx="2" fill="#475569"/>`,
+    staff:  `<path d="M84 110 L84 38" stroke="#7c2d12" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M84 41 Q76 34 80 24 M84 41 Q92 34 88 24" stroke="#7c2d12" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <circle cx="84" cy="30" r="11" fill="#a78bfa44"/><circle cx="84" cy="30" r="6.5" fill="#8b5cf6" stroke="#ede9fe" stroke-width="1.5"/>
+      <circle cx="82" cy="28" r="2" fill="#fff"/>`
   }[weapon];
   return `<svg class="${cls}" viewBox="0 -12 100 150">
     ${back}
     <rect x="37" y="96" width="11" height="34" rx="4" fill="${pants}"/><rect x="52" y="96" width="11" height="34" rx="4" fill="${pants}"/>
     <ellipse cx="41" cy="131" rx="8" ry="4" fill="#3f3f46"/><ellipse cx="59" cy="131" rx="8" ry="4" fill="#3f3f46"/>
-    <g><rect x="23" y="60" width="10" height="32" rx="5" fill="${shirt}" stroke="#0002"/><circle cx="28" cy="94" r="5" fill="${skin}"/></g>
+    <path d="M28 64 L20 88" stroke="#0002" stroke-width="11.5" stroke-linecap="round"/><path d="M28 64 L20 88" stroke="${shirt}" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="20" cy="91" r="5" fill="${skin}"/>
     <rect x="46" y="52" width="8" height="8" fill="${skin}"/>
     <rect x="32" y="57" width="36" height="42" rx="9" fill="${shirt}" stroke="#0002"/>
     <rect x="32" y="90" width="36" height="5" fill="#0003"/>
@@ -246,7 +265,8 @@ function person(look, cls = "") {
     ${hair}
     <g class="arm">
       ${tool}
-      <rect x="67" y="60" width="10" height="32" rx="5" fill="${shirt}" stroke="#0002"/><circle cx="72" cy="94" r="5" fill="${skin}"/>
+      <path d="M72 64 L84 88" stroke="#0002" stroke-width="11.5" stroke-linecap="round"/><path d="M72 64 L84 88" stroke="${shirt}" stroke-width="10" stroke-linecap="round"/>
+      <circle cx="84" cy="91" r="5" fill="${skin}"/>
     </g>
   </svg>`;
 }
@@ -472,18 +492,24 @@ function startBattle() {
 function resolve() {
   const ev = [];
   const acting = room.players.filter(p => active(p) && p.pick);
-  // 1) 회복과 방어
+  const attackers = acting.filter(p => p.pick === "atk");
+  const attacked = new Set(attackers.map(p => p.target));
+  // 1) 회복 (공격받으면 실패) 과 방어
   acting.forEach(p => {
-    if (p.pick === "heal") { const amt = Math.min(p.st.hp, p.hp + p.st.heal) - p.hp; p.hp += amt; ev.push({ k: "heal", who: p.pid, amt }); }
+    if (p.pick === "heal") {
+      if (attacked.has(p.pid)) { ev.push({ k: "heal", who: p.pid, amt: 0, fail: true }); return; }
+      const amt = Math.min(p.st.hp, p.hp + p.st.heal) - p.hp; p.hp += amt;
+      ev.push({ k: "heal", who: p.pid, amt });
+    }
     if (p.pick === "def") ev.push({ k: "def", who: p.pid });
   });
-  // 2) 공격 (상대가 방어하면 방어력만큼 피해가 줄어요)
+  // 2) 공격 (상대가 방어하면 완전히 막히고, 방어력만큼 반격을 받아요)
   const dmg = {};
-  acting.filter(p => p.pick === "atk").forEach(p => {
+  const hurt = (pid, d) => { dmg[pid] = (dmg[pid] || 0) + d; };
+  attackers.forEach(p => {
     const t = P(p.target);
-    const d = t.pick === "def" ? Math.max(0, p.st.atk - t.st.def) : p.st.atk;
-    dmg[t.pid] = (dmg[t.pid] || 0) + d;
-    ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: d, guard: t.pick === "def" });
+    if (t.pick === "def") { hurt(p.pid, t.st.def); ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: 0, counter: t.st.def }); }
+    else { hurt(t.pid, p.st.atk); ev.push({ k: "atk", who: p.pid, to: t.pid, dmg: p.st.atk }); }
   });
   room.players.forEach(p => { p.hp = Math.max(0, p.hp - (dmg[p.pid] || 0)); p.pick = null; p.target = null; });
   // 3) 라운드가 끝나면 살아 있는 사람은 스탯 포인트를 받아요
@@ -627,6 +653,7 @@ function renderCustom(v) {
     </div>
     <div class="card">
       <h2>📈 처음 스탯 찍기</h2>
+      <div class="sub">🛡️ 방어하면 공격을 완전히 막고, 반격 스탯만큼 되돌려 줘요.<br>⚔️ 공격은 회복을 끊고, 💚 회복은 상대가 방어할 때 안전해요.</div>
       <div class="ptsbar"><span class="left">⭐ 남은 포인트 ${START_POINTS - used}</span>
         <button class="linkbtn" onclick="draft.alloc={hp:0,atk:0,def:0,heal:0};render()">다시 찍기</button></div>
       <div class="stats">${Object.entries(STATS).map(([k, s]) =>
@@ -690,8 +717,9 @@ function renderBattle(v) {
   } else {
     panel = `<div class="acts">
       <button class="atk" onclick="choose('atk')">${ACTS.atk.label}<small>피해 ${st.atk}</small></button>
-      <button class="def" onclick="choose('def')">${ACTS.def.label}<small>피해 -${st.def}</small></button>
-      <button class="heal" onclick="choose('heal')">${ACTS.heal.label}<small>+${st.heal}</small></button></div>`;
+      <button class="def" onclick="choose('def')">${ACTS.def.label}<small>막고 반격 ${st.def}</small></button>
+      <button class="heal" onclick="choose('heal')">${ACTS.heal.label}<small>+${st.heal}</small></button></div>
+      <div class="rps">🛡️방어는 ⚔️공격을 막고 반격 · ⚔️공격은 💚회복을 끊어요 · 💚회복은 🛡️방어할 때 안전</div>`;
   }
   // 라운드가 지나면 받은 스탯 포인트를 찍어요
   const levelup = v.phase === "battle" && alive && v.myPts > 0 ? `
@@ -739,27 +767,65 @@ function floatText(f, text, cls) {
   s.className = "float " + cls; s.textContent = text;
   f.appendChild(s);
 }
+// 마법 구슬: 지팡이 끝에서 상대에게 날아가요
+const center = n => { const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, r }; };
+function fly(from, to) {
+  if (!from || !to) return;
+  const a = center(from), b = center(to);
+  const flipped = from.closest(".enemy");
+  const sx = flipped ? a.r.left + a.w * .16 : a.r.right - a.w * .16, sy = a.r.top + a.h * .2;
+  const o = document.createElement("div");
+  o.className = "orb"; document.body.appendChild(o);
+  o.animate([{ transform: `translate(${sx}px, ${sy}px) scale(.5)` }, { transform: `translate(${b.x}px, ${b.y}px) scale(1.2)` }],
+    { duration: 330, easing: "ease-in", fill: "forwards" }).onfinish = () => o.remove();
+}
+function burst(to) {
+  if (!to) return;
+  const b = center(to), o = document.createElement("div");
+  o.className = "orb"; document.body.appendChild(o);
+  o.animate([{ transform: `translate(${b.x}px, ${b.y}px) scale(1)`, opacity: 1 }, { transform: `translate(${b.x}px, ${b.y}px) scale(4)`, opacity: 0 }],
+    { duration: 500, fill: "forwards" }).onfinish = () => o.remove();
+}
 async function playEvents(ev) {
   ev.forEach(e => {
     const f = el(e.who);
     if (!f) return;
-    if (e.k === "heal") { f.classList.add("anim-heal"); floatText(f, e.amt > 0 ? "+" + e.amt : "체력 가득!", "heal"); }
+    if (e.k === "heal" && !e.fail) { f.classList.add("anim-heal"); floatText(f, e.amt > 0 ? "+" + e.amt : "체력 가득!", "heal"); }
     if (e.k === "def") { const s = document.createElement("span"); s.className = "shield"; s.textContent = "🛡️"; f.appendChild(s); }
   });
   await wait(350);
   const myTeam = view.players.find(p => p.pid === myPid).team;
   const atks = ev.filter(e => e.k === "atk");
   atks.forEach(e => {
-    const a = el(e.who);
-    if (a) a.classList.add(view.players.find(p => p.pid === e.who).team === myTeam ? "anim-up" : "anim-down");
+    const a = el(e.who), t = el(e.to);
+    const who = view.players.find(p => p.pid === e.who);
+    if (!a) return;
+    if (LOOK.weapon[cleanLook(who.look).weapon] === "staff") { a.classList.add("anim-cast"); fly(a.querySelector(".body"), t && t.querySelector(".body")); }
+    else a.classList.add(who.team === myTeam ? "anim-up" : "anim-down");
   });
-  await wait(300);
+  await wait(330);
+  atks.forEach(e => {
+    const who = view.players.find(p => p.pid === e.who), t = el(e.to);
+    if (t && LOOK.weapon[cleanLook(who.look).weapon] === "staff") burst(t.querySelector(".body"));
+  });
   atks.forEach(e => {
     const t = el(e.to);
     if (!t) return;
-    if (e.dmg > 0) { t.classList.add("anim-hit"); floatText(t, "-" + e.dmg, "dmg"); }
-    else floatText(t, "막음!", "block");
+    if (e.dmg > 0) {
+      t.classList.add("anim-hit"); floatText(t, "-" + e.dmg, "dmg");
+      if (ev.some(x => x.k === "heal" && x.fail && x.who === e.to)) setTimeout(() => floatText(t, "회복 실패!", "block"), 350);
+    } else floatText(t, "막음!", "block");
   });
+  // 막힌 공격은 반격을 받아요
+  const counters = atks.filter(e => e.counter > 0);
+  if (counters.length) {
+    await wait(450);
+    counters.forEach(e => {
+      const d = el(e.to), a = el(e.who);
+      if (d) d.classList.add(view.players.find(p => p.pid === e.to).team === myTeam ? "anim-up" : "anim-down");
+      if (a) { a.classList.remove("anim-up", "anim-down"); a.classList.add("anim-hit"); floatText(a, "반격 -" + e.counter, "dmg"); }
+    });
+  }
   await wait(1000);
 }
 
