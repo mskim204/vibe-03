@@ -128,7 +128,6 @@ const ROOM_PREFIX = "vibe03-battle-";  // 다른 게임과 방 코드가 겹치�
 <div class="wrap">
   <h1>⚔️ 공격 방어 회복 대결</h1>
   <div id="app"></div>
-  <a class="home" href="index.html">← 사이트 처음으로</a>
 </div>
 <script>
 const ACTS = {
@@ -184,8 +183,8 @@ function person(i, cls = "") {
 
 // ---------- 처음 메뉴 ----------
 function menu(err = "") {
-  if (peer) { peer.destroy(); peer = null; }
-  isHost = false; room = null; view = null; hostConn = null; lastRound = 0;
+  if (room || hostConn || !peer) { if (peer) peer.destroy(); warmPeer(); }   // 게임에서 나오면 새 연결 준비
+  onReady = null; isHost = false; room = null; view = null; hostConn = null; lastRound = 0;
   show(`
     <div class="card">
       <label class="field">내 이름</label>
@@ -202,7 +201,6 @@ function menu(err = "") {
     </div>
     <div class="card">
       <h2>🏠 방 만들기</h2>
-      <div class="sub">체력, 공격, 회복, 횟수, 몇 대 몇인지 정할 수 있어요.</div>
       <button class="btn" onclick="saveName(); createForm()">방 만들기</button>
     </div>
     <div class="err">${esc(err)}</div>`);
@@ -233,7 +231,7 @@ function createForm() {
       <div class="row modes">${[1, 2, 3].map(n => `<button class="${s.size === n ? "on" : ""}" onclick="setSize(${n})">${n} 대 ${n}</button>`).join("")}</div>
       ${slider("hp", "❤️ 최대 체력", s.hp, "")}
       ${slider("atk", "⚔️ 공격 피해", s.atk, "")}
-      <div class="sub">🛡️ 방어하면 피해가 <b id="v-def">${s.atk}</b> 줄어요 (공격 피해와 같아서 완전히 막아요)</div>
+      <div class="sub">🛡️ 방어하면 피해가 <b id="v-def">${s.atk}</b> 줄어요</div>
       ${slider("heal", "💚 회복량", s.heal, "")}
       ${slider("uses.atk", "⚔️ 공격 횟수", s.uses.atk, "번")}
       ${slider("uses.def", "🛡️ 방어 횟수", s.uses.def, "번")}
@@ -249,24 +247,44 @@ function newCode() {
   const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join("");
 }
-function createRoom(tries = 0) {
-  $("makeBtn").disabled = true;
-  $("err").textContent = "방을 여는 중...";
-  const code = newCode();
-  peer = new Peer(ROOM_PREFIX + code, PEER_OPTS);
-  peer.on("open", () => {
-    isHost = true; myPid = "host";
-    room = { code, s: JSON.parse(JSON.stringify(settings)), phase: "lobby", round: 0, roundNo: 0, events: [], players: [] };
-    room.players.push(newPlayer("host", me.name, me.char, 0, null));
-    sync();
+// 메뉴가 열리면 미리 연결해 둬요. 그래서 방 만들기 · 들어가기가 빨라요.
+let peerCode = null, peerReady = false, onReady = null, readyTimer = null;
+function warmPeer(tries = 0) {
+  peerCode = newCode(); peerReady = false;
+  const p = peer = new Peer(ROOM_PREFIX + peerCode, PEER_OPTS);
+  p.on("open", () => {
+    if (peer !== p) return;
+    peerReady = true; clearTimeout(readyTimer);
+    if (onReady) { const f = onReady; onReady = null; f(); }
   });
-  peer.on("connection", conn => {
+  p.on("connection", conn => {
+    if (!isHost) return conn.close();
     conn.on("data", d => hostHandle(conn.peer, d, conn));
     conn.on("close", () => playerLeft(conn.peer));
   });
-  peer.on("error", e => {
-    if (e.type === "unavailable-id" && tries < 5) { peer.destroy(); createRoom(tries + 1); return; }
-    if (!room) { $("makeBtn").disabled = false; $("err").textContent = "방을 열 수 없어요. 인터넷 연결을 확인해 주세요."; }
+  p.on("disconnected", () => { if (peer === p && !p.destroyed) p.reconnect(); });
+  p.on("error", e => {
+    if (peer !== p) return;
+    if (e.type === "unavailable-id" && tries < 5) { p.destroy(); warmPeer(tries + 1); return; }
+    if (e.type === "peer-unavailable") { if (!view) { hostConn = null; menu("그런 방이 없어요. 방 코드를 확인해 주세요."); } return; }
+    if (onReady) { onReady = null; clearTimeout(readyTimer); hostConn = null; menu("연결할 수 없어요. 인터넷 연결을 확인해 주세요."); }
+  });
+}
+function whenReady(f) {
+  if (peerReady) return f();
+  onReady = f;
+  clearTimeout(readyTimer);
+  readyTimer = setTimeout(() => { if (onReady && !peerReady) { peer.destroy(); warmPeer(); } }, 8000); // 너무 늦으면 다시 연결
+}
+
+function createRoom() {
+  $("makeBtn").disabled = true;
+  $("err").textContent = "방을 여는 중...";
+  whenReady(() => {
+    isHost = true; myPid = "host";
+    room = { code: peerCode, s: JSON.parse(JSON.stringify(settings)), phase: "lobby", round: 0, roundNo: 0, events: [], players: [] };
+    room.players.push(newPlayer("host", me.name, me.char, 0, null));
+    sync();
   });
 }
 
@@ -378,17 +396,16 @@ function joinRoom() {
   const code = $("code").value.trim().toUpperCase();
   if (code.length !== 4) return menu("방 코드 4자리를 써 주세요.");
   show(`<div class="card center"><h2>🔌 방 ${esc(code)}에 들어가는 중...</h2></div>`);
-  peer = new Peer(undefined, PEER_OPTS);
-  peer.on("open", () => {
+  whenReady(() => {
+    if (code === peerCode) return menu("내 방 코드예요. 친구 방 코드를 써 주세요.");
     hostConn = peer.connect(ROOM_PREFIX + code, { reliable: true });
     hostConn.on("open", () => hostConn.send({ t: "join", name: me.name, char: me.char }));
     hostConn.on("data", m => {
       if (m.t === "state") receive(m.v);
       if (m.t === "error") menu(m.msg);
     });
-    hostConn.on("close", () => { if (peer) menu("방장과 연결이 끊겼어요."); });
+    hostConn.on("close", () => { if (hostConn) menu("방장과 연결이 끊겼어요."); });
   });
-  peer.on("error", e => menu(e.type === "peer-unavailable" ? "그런 방이 없어요. 방 코드를 확인해 주세요." : "연결할 수 없어요. 인터넷 연결을 확인해 주세요."));
 }
 
 function send(m) { if (isHost) hostHandle("host", m); else if (hostConn) hostConn.send(m); }
@@ -413,12 +430,12 @@ function render() {
 function renderLobby(v) {
   const meP = v.players.find(p => p.pid === myPid);
   const full = [0, 1].every(t => v.players.filter(p => p.team === t).length === v.s.size);
-  const team = t => `<div class="team t${t}"><b>${TEAMS[t]}</b> <span class="sub">(${v.players.filter(p => p.team === t).length}/${v.s.size})</span>
-    ${v.players.filter(p => p.team === t).map(p => `<div>${person(p.char, "mini")} ${esc(p.name)}${p.pid === "host" ? " 👑" : ""}${p.pid === myPid ? " (나)" : ""}</div>`).join("")}</div>`;
+  const team = t => `<div class="team t${t}"><b>${TEAMS[t]}</b> <span class="sub">${v.players.filter(p => p.team === t).length}/${v.s.size}</span>
+    ${v.players.filter(p => p.team === t).map(p => `<div>${person(p.char, "mini")} ${esc(p.name)}${p.pid === "host" ? " 👑" : ""}${p.pid === myPid ? " ⭐" : ""}</div>`).join("")}</div>`;
   const s = v.s;
   show(`
     <div class="card center">
-      <div class="sub">방 코드 (친구에게 알려 주세요)</div>
+      <div class="sub">방 코드</div>
       <div class="code">${v.code}</div>
       <div class="sub">${s.size} 대 ${s.size} · ❤️ ${s.hp} · ⚔️ ${s.atk} · 🛡️ ${s.atk} 막기 · 💚 ${s.heal}<br>
         횟수: 공격 ${s.uses.atk}번 · 방어 ${s.uses.def}번 · 회복 ${s.uses.heal}번</div>
@@ -475,7 +492,7 @@ function renderBattle(v) {
     panel = `<div class="center"><h2>💀 쓰러졌어요</h2><div class="sub">우리 팀을 응원해 주세요!</div></div>`;
   } else if (v.myPick) {
     panel = `<div class="center"><h2>✅ ${ACTS[v.myPick].label}!</h2>
-      <div class="sub">다른 사람을 기다리는 중... (${waiting.filter(p => p.picked).length}/${waiting.length})</div></div>`;
+      <div class="sub">다른 사람을 기다리는 중... ${waiting.filter(p => p.picked).length}/${waiting.length}</div></div>`;
   } else if (choosingTarget) {
     panel = `<div class="center"><b>누구를 공격할까요? 🎯</b></div><div class="acts">
       ${aliveFoes.map(p => `<button class="atk" onclick="attack('${p.pid}')">🎯 ${esc(p.name)}<small>❤️ ${p.hp}</small></button>`).join("")}
