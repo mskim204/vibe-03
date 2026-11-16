@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>공격 방어 회복 대결</title>
+<script>
+// ===== 여기만 고치면 돼요 =====
+const MAX_HP = 100;       // 처음 체력 (최대 체력)
+const USES = 5;           // 공격 · 방어 · 회복 각각 쓸 수 있는 횟수
+const ATTACK = 25;        // 공격 피해
+const DEFEND = 20;        // 방어하면 줄어드는 피해
+const HEAL = 15;          // 회복량
+const NAMES = ["🔴 플레이어 1", "🔵 플레이어 2"];
+const KEYS = [["q", "w", "e"], ["i", "o", "p"]]; // 키보드로 몰래 고르기 (공격, 방어, 회복)
+// ===============================
+</script>
+<style>
+  :root { --p1: #dc2626; --p2: #2563eb; --line: #e2e8f0; --soft: #f8fafc; --text: #0f172a; --sub: #64748b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: sans-serif; background: #f1f5f9; color: var(--text); }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { text-align: center; margin: 8px 0 4px; font-size: 1.6rem; }
+  .rule { text-align: center; color: var(--sub); margin: 0 0 16px; font-size: .95rem; line-height: 1.5; }
+  .round { text-align: center; font-weight: bold; margin-bottom: 12px; }
+  .board { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) { .board { grid-template-columns: 1fr; } }
+  .player { background: #fff; border: 3px solid var(--line); border-radius: 16px; padding: 14px; }
+  .player.p0 { border-color: var(--p1); }
+  .player.p1 { border-color: var(--p2); }
+  .name { font-weight: bold; font-size: 1.15rem; margin-bottom: 8px; }
+  .hpbar { height: 22px; background: #e5e7eb; border-radius: 11px; overflow: hidden; }
+  .hpfill { height: 100%; background: #22c55e; transition: width .4s, background .4s; }
+  .hptext { margin: 6px 0 12px; font-weight: bold; }
+  .btns { display: grid; gap: 8px; }
+  .btns button { padding: 12px; font-size: 1rem; font-weight: bold; border: 0; border-radius: 10px; cursor: pointer; color: #fff; }
+  .btns button:disabled { opacity: .35; cursor: not-allowed; }
+  .atk { background: #ea580c; } .def { background: #0891b2; } .heal { background: #16a34a; }
+  .key { font-weight: normal; opacity: .8; font-size: .85rem; }
+  .status { margin-top: 10px; min-height: 1.4em; text-align: center; font-weight: bold; color: var(--sub); }
+  .status.done { color: #15803d; }
+  .log { margin-top: 16px; background: #fff; border-radius: 16px; padding: 14px; border: 1px solid var(--line); }
+  .log h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .log ol { margin: 0; padding-left: 22px; max-height: 240px; overflow-y: auto; line-height: 1.6; }
+  .result { display: none; text-align: center; background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 3px solid #facc15; }
+  .result h2 { margin: 0 0 8px; font-size: 1.6rem; }
+  .again { margin-top: 10px; padding: 12px 24px; font-size: 1.05rem; font-weight: bold; border: 0; border-radius: 10px; background: #4f46e5; color: #fff; cursor: pointer; }
+  .home { display: block; text-align: center; margin-top: 18px; color: #4f46e5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚔️ 공격 방어 회복 대결</h1>
+  <p class="rule" id="rule"></p>
+  <div class="result" id="result"><h2 id="resultTitle"></h2><div id="resultText"></div><button class="again" onclick="start()">다시 하기</button></div>
+  <div class="round" id="round"></div>
+  <div class="board" id="board"></div>
+  <div class="log"><h2>📜 기록</h2><ol id="log"></ol></div>
+  <a class="home" href="index.html">← 처음으로</a>
+</div>
+<script>
+const ACTIONS = [
+  { id: "atk", label: "⚔️ 공격", cls: "atk" },
+  { id: "def", label: "🛡️ 방어", cls: "def" },
+  { id: "heal", label: "💚 회복", cls: "heal" }
+];
+let players, round, over;
+
+document.getElementById("rule").innerHTML =
+  `두 사람이 동시에 몰래 행동을 골라요. 공격 · 방어 · 회복은 <b>각각 ${USES}번</b>까지만!<br>` +
+  `공격 ${ATTACK} 피해 · 방어하면 피해 ${DEFEND} 줄임 · 회복 +${HEAL}<br>` +
+  `체력이 0이 되거나 기회를 다 쓰면 끝! <b>체력이 더 많은 사람이 승리</b> 🏆<br>` +
+  `<small>키보드로 몰래 고르기: 플레이어 1 = Q/W/E, 플레이어 2 = I/O/P</small>`;
+
+function start() {
+  players = [0, 1].map(i => ({ hp: MAX_HP, left: { atk: USES, def: USES, heal: USES }, pick: null }));
+  round = 1; over = false;
+  document.getElementById("log").innerHTML = "";
+  document.getElementById("result").style.display = "none";
+  render();
+}
+
+function render() {
+  document.getElementById("round").textContent = over ? "게임 끝!" : `라운드 ${round} / ${USES * 3}`;
+  document.getElementById("board").innerHTML = players.map((p, i) => {
+    const pct = Math.max(0, p.hp) / MAX_HP * 100;
+    const color = pct > 50 ? "#22c55e" : pct > 25 ? "#f59e0b" : "#ef4444";
+    const btns = ACTIONS.map((a, k) =>
+      `<button class="${a.cls}" onclick="pick(${i},'${a.id}')" ${over || p.pick || p.left[a.id] <= 0 ? "disabled" : ""}>
+        ${a.label} (${p.left[a.id]}번 남음) <span class="key">[${KEYS[i][k].toUpperCase()}]</span></button>`).join("");
+    return `<div class="player p${i}">
+      <div class="name">${NAMES[i]}</div>
+      <div class="hpbar"><div class="hpfill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="hptext">❤️ ${Math.max(0, p.hp)} / ${MAX_HP}</div>
+      <div class="btns">${btns}</div>
+      <div class="status ${p.pick ? "done" : ""}">${over ? "" : p.pick ? "✅ 선택 완료! (비밀)" : "🤔 고르는 중..."}</div>
+    </div>`;
+  }).join("");
+}
+
+function pick(i, id) {
+  const p = players[i];
+  if (over || p.pick || p.left[id] <= 0) return;
+  p.pick = id;
+  render();
+  if (players[0].pick && players[1].pick) setTimeout(resolve, 300);
+}
+
+function nameOf(id) { return ACTIONS.find(a => a.id === id).label; }
+
+function resolve() {
+  const [a, b] = players;
+  const lines = [];
+  // 1) 회복 먼저
+  players.forEach((p, i) => {
+    p.left[p.pick]--;
+    if (p.pick === "heal") {
+      const before = p.hp;
+      p.hp = Math.min(MAX_HP, p.hp + HEAL);
+      lines.push(`${NAMES[i]} 회복 +${p.hp - before}`);
+    }
+  });
+  // 2) 공격 (상대가 방어하면 피해 줄임)
+  const dmg = [0, 0];
+  players.forEach((p, i) => {
+    if (p.pick !== "atk") return;
+    const other = players[1 - i];
+    let d = ATTACK;
+    if (other.pick === "def") d = Math.max(0, ATTACK - DEFEND);
+    dmg[1 - i] = d;
+    lines.push(`${NAMES[i]}의 공격 → ${NAMES[1 - i]} ${other.pick === "def" ? `방어! 피해 ${d}` : `피해 ${d}`}`);
+  });
+  players.forEach((p, i) => p.hp -= dmg[i]);
+  if (!lines.length) lines.push("아무 일도 일어나지 않았어요");
+
+  const li = document.createElement("li");
+  li.innerHTML = `<b>${NAMES[0]}</b> ${nameOf(a.pick)} vs <b>${NAMES[1]}</b> ${nameOf(b.pick)} — ${lines.join(", ")} ` +
+    `<span style="color:var(--sub)">(❤️ ${Math.max(0, a.hp)} : ${Math.max(0, b.hp)})</span>`;
+  const log = document.getElementById("log");
+  log.appendChild(li);
+  log.scrollTop = log.scrollHeight;
+
+  players.forEach(p => p.pick = null);
+  round++;
+  // 3) 끝났는지 확인: 누가 쓰러졌거나, 누가 남은 기회가 없을 때
+  const noChance = players.some(p => p.left.atk + p.left.def + p.left.heal === 0);
+  if (a.hp <= 0 || b.hp <= 0 || noChance) finish(a.hp <= 0 || b.hp <= 0 ? "쓰러짐" : "기회 끝");
+  render();
+}
+
+function finish(reason) {
+  over = true;
+  const [a, b] = players.map(p => Math.max(0, p.hp));
+  const title = a === b ? "🤝 무승부!" : `🏆 ${a > b ? NAMES[0] : NAMES[1]} 승리!`;
+  const why = reason === "쓰러짐" ? "체력이 0이 되었어요." : "기회를 모두 썼어요.";
+  document.getElementById("resultTitle").textContent = title;
+  document.getElementById("resultText").textContent = `${why} 최종 체력 ${a} : ${b}`;
+  document.getElementById("result").style.display = "block";
+}
+
+document.addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  KEYS.forEach((keys, i) => {
+    const idx = keys.indexOf(k);
+    if (idx >= 0) pick(i, ACTIONS[idx].id);
+  });
+});
+
+start();
+</script>
+</body>
+</html>
