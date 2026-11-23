@@ -905,14 +905,17 @@ function makeGlasses(ai) {
   }
   mesh(box(0.02, 0.011, 0.01), frame, 0, 0.013, 0, g);                       // 코 다리
   if (ai) {
-    // 오른쪽 모서리에 둥글게 살짝 튀어나온 초소형 카메라
-    const c = new THREE.Group(); c.position.set(0.086, 0.012, -0.008); g.add(c);
-    const camM = pho(0x3d3d3d, { shininess: 80 });              // 카메라는 뿔테보다 약간 연한 검정(진회색)
+    // 오른쪽 모서리에 둥글게 튀어나온 초소형 카메라 (크게 · 은색 테두리 · 빨간 불빛으로 잘 보이게)
+    const c = new THREE.Group(); c.position.set(0.094, 0.012, -0.012); c.scale.setScalar(2.0); g.add(c);
+    const camM = pho(0x7c7c7c, { shininess: 90 });              // 카메라는 검정 뿔테와 확 달라 보이는 회색
     const body = mesh(cyl(0.0115, 0.014, 20), camM, 0, 0, 0, c); body.rotation.x = Math.PI / 2;
     const dome = mesh(geo("camDome", () => new THREE.SphereGeometry(0.0115, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2)), camM, 0, 0, -0.007, c);
     dome.rotation.x = -Math.PI / 2; dome.scale.set(1, 0.7, 1);                 // 앞으로 둥글게 튀어나와요
+    mesh(geo("camRing", () => new THREE.TorusGeometry(0.0068, 0.0016, 8, 20)), pho(0xe5e7eb, { shininess: 200 }), 0, 0, -0.0125, c);   // 은색 렌즈 테두리
     mesh(sph(0.0055, 12, 8), pho(0x000000, { shininess: 250, specular: 0xffffff }), 0, 0, -0.0135, c);   // 렌즈
     mesh(sph(0.0016, 6, 4), bas(0xffffff), -0.002, 0.002, -0.0185, c);      // 렌즈 반짝임
+    const led = mesh(sph(0.0028, 8, 6), CAM_LED, 0.0075, 0.0075, -0.009, c); // 빨간 녹화 불빛 (깜빡여요)
+    g.userData.led = led;
   }
   return g;
 }
@@ -1335,7 +1338,7 @@ function prTick(dt) {
   const K = [[0, -0.32, -0.5], [0.35, -0.08, -0.05], [0.55, -0.36, -1.75], [1, -0.32, -0.5]];
   let fy = -0.32, rx = -0.5;
   if (t >= 0) for (let i = 1; i < K.length; i++) if (t <= K[i][0]) { const a = K[i - 1], b = K[i], u = (t - a[0]) / (b[0] - a[0]); fy = a[1] + (b[1] - a[1]) * u; rx = a[2] + (b[2] - a[2]) * u; break; }
-  fp.position.set(0.3, fy + bob * 0.5, -0.45); fp.rotation.set(rx, 0.35, 0.15);
+  fp.position.set(0.36, fy - 0.1 + bob * 0.5, -0.5); fp.rotation.set(rx, 0.35, 0.15);
   // 조준한 수험생
   R.ray.setFromCamera({ x: 0, y: 0 }, cam);
   const h = R.ray.intersectObjects(R.hit, false)[0];
@@ -1456,6 +1459,7 @@ function frame(t) {
     o.hN.visible = held === 1; o.hA.visible = held === 2;
     o.camC.visible = !!c.cam;
     if (c.cam) o.camC.userData.led.visible = (now * 2.5) % 1 < 0.6;
+    if (face === 2) o.gA.userData.led.visible = (now * 2 + o.sid * 0.37) % 1 < 0.6;
     const target = o.pose === 1 ? POSE.chest : POSE.face, rest = POSE.rest, a = o.arm;
     const write = a < 0.05 && !c.caught ? Math.sin(now * 9 + o.sid) * 0.06 : 0;
     o.aR.sh.rotation.x = rest[0] + (target[0] - rest[0]) * a;
