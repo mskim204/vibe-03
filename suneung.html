@@ -18,7 +18,8 @@ const MAX_PEOPLE = 17;                  // 감독관 1명 + 수험생 16명
 const SEATS = 16;                       // 교실 자리 (빈 자리는 AI 수험생이 채워요)
 const SWAP = 1.4;                       // 안경 갈아 끼우는 데 걸리는 시간(초)
 const RANGE = 2.6;                      // 감독관이 검사할 수 있는 거리(m)
-const FREEZE = 4;                       // 잘못 검사했을 때 사과하느라 못 움직이는 시간(초)
+const FREEZE = 4;
+const LINGER = 2;                       // AI 안경 · 카메라를 숨긴 뒤에도 2초 동안은 검사하면 걸려요                       // 잘못 검사했을 때 사과하느라 못 움직이는 시간(초)
 const BROKERS = [
   { url: "wss://mqtt.eclipseprojects.io/mqtt" },
   { url: "wss://public.cloud.shiftr.io", username: "public", password: "public" },
@@ -347,6 +348,7 @@ function menu(err = "") {
         <li>🧑‍🎓 <b>수험생</b>: <b>G</b>로 일반 안경 ↔ <b>AI 안경</b>을 갈아 끼우면 정답이 보여요. <b>C</b>는 초소형 카메라.
           끝까지 안 들키고 <b>모든 문제를 풀면 성공!</b></li>
         <li>👮 <b>감독관</b>: 걸어 다니며 수상한 수험생을 가까이서 <b>검사</b>해요. AI 안경에는 <b>동그란 카메라</b>가 달려 있어요.
+          숨긴 뒤에도 <b>2초 동안은</b> 검사하면 잡혀요!
           들키면 장비를 부숴요! 정직한 학생을 검사하면 4초 동안 사과해야 해요.</li>
       </ul>
     </div>
@@ -472,6 +474,9 @@ function newStudent(sid, kind, pid, total) {
 }
 // 지금 부정행위 장비를 쓰는 중인지 (안경을 바꾸는 중에 AI 안경을 손에 들고 있어도 걸려요)
 const cheating = s => s.g === 2 || s.cam === 1 || (s.swTo >= 0 && (s.swTo === 2 || s.swFrom === 2));
+const devOf = s => s.g === 2 || (s.swTo >= 0 && (s.swTo === 2 || s.swFrom === 2)) ? "glasses" : "cam";
+// 지금 쓰고 있거나, 숨긴 지 2초가 안 지났으면 걸려요
+const catchable = s => cheating(s) || s.hotT > 0;
 
 function setProPose(m) {
   const P = G.pro;
@@ -494,11 +499,11 @@ function doInspect(sid) {
   const s = G.students[sid], P = G.pro;
   if (!s || s.caught || P.frozen > 0) return;
   if (Math.hypot(s.x - P.x, s.z - P.z) > RANGE + 0.9) return;
-  if (cheating(s)) catchStudent(s, "pro");
+  if (catchable(s)) catchStudent(s, "pro");
   else { G.strikes++; P.frozen = FREEZE; toAll({ t: "fx", k: "wrong", sid }); }
 }
 function catchStudent(s, by) {
-  const dev = s.g === 2 || s.swTo === 2 || s.swFrom === 2 ? "glasses" : "cam";
+  const dev = cheating(s) ? devOf(s) : (s.lastDev || "glasses");
   s.caught = true; s.g = 0; s.swTo = -1; s.swP = 0; s.cam = 0; s.act = 0;
   toAll({ t: "fx", k: "smash", sid: s.sid, dev, by });
 }
@@ -512,6 +517,7 @@ function hostTick() {
   if (G.proctor === "ai") aiProctorTick(dt);
   for (const s of G.students) {
     if (s.caught) { s.yaw *= 0.9; s.pitch = -0.7; continue; }
+    if (cheating(s)) { s.hotT = LINGER; s.lastDev = devOf(s); } else if (s.hotT > 0) s.hotT = Math.max(0, s.hotT - dt);
     if (s.pid) { if (s.swTo >= 0) s.swP = Math.min(1, s.swP + dt / SWAP); continue; }
     botTick(s, dt, P);
   }
@@ -632,7 +638,7 @@ function aiProctorTick(dt) {
   // 눈앞에서 부정행위 장비가 보이면 잡아요
   for (const s of G.students) {
     if (s.caught) continue;
-    if (!cheating(s)) { s.susp = Math.max(0, s.susp - dt); continue; }
+    if (!catchable(s)) { s.susp = Math.max(0, s.susp - dt); continue; }
     const vx = s.x - P.x, vz = s.z - P.z, d = Math.hypot(vx, vz) || 0.01;
     const cos = (vx * -Math.sin(P.yaw) + vz * -Math.cos(P.yaw)) / d;
     const camOnly = s.g !== 2 && !(s.swTo >= 0 && (s.swTo === 2 || s.swFrom === 2));
@@ -863,18 +869,35 @@ function buildRoom(scene) {
 }
 
 // ---------- 안경 만들기 ----------
+// 뿔테 안경: 두껍고 각진 갈색 테 (일반 안경 · AI 안경 모두 같은 뿔테라서 카메라를 잘 봐야 구별돼요)
+function roundRect(w, h, r, dy = 0) {
+  const sh = new THREE.Shape(), x = -w / 2, y = -h / 2 + dy;
+  sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r);
+  sh.lineTo(x + w, y + h - r); sh.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  sh.lineTo(x + r, y + h); sh.quadraticCurveTo(x, y + h, x, y + h - r);
+  sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+  return sh;
+}
 function makeGlasses(ai) {
   const g = new THREE.Group();
-  const frame = ai ? pho(0x0b0b0b) : lam(0x6b4f3a);
-  const lens = geo("lens", () => new THREE.CircleGeometry(0.03, 20));
+  const frame = pho(0x3a2213, { shininess: 70 });            // 진한 갈색 뿔테
+  const brow = pho(0x1f120a, { shininess: 70 });             // 위쪽 눈썹 부분은 더 진하게
+  const rim = geo("hornRim", () => {
+    const sh = roundRect(0.062, 0.048, 0.014);
+    sh.holes.push(roundRect(0.046, 0.032, 0.009, -0.002));   // 위쪽 테가 더 두꺼워요
+    const gg = new THREE.ExtrudeGeometry(sh, { depth: 0.007, bevelEnabled: false, curveSegments: 6 });
+    gg.translate(0, 0, -0.0035); return gg;
+  });
+  const lens = geo("hornLens", () => new THREE.ShapeGeometry(roundRect(0.047, 0.033, 0.009, -0.002), 6));
   const lensM = MAT.lens || (MAT.lens = new THREE.MeshPhongMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, shininess: 120 }));
-  const ring = geo("ring" + ai, () => new THREE.TorusGeometry(ai ? 0.033 : 0.03, ai ? 0.0068 : 0.0035, 8, 24));
   for (const sx of [-1, 1]) {
-    mesh(ring, frame, sx * 0.046, 0, 0, g);
-    mesh(lens, lensM, sx * 0.046, 0, 0, g);
-    mesh(box(ai ? 0.012 : 0.005, ai ? 0.014 : 0.005, 0.12), frame, sx * (ai ? 0.083 : 0.077), 0.006, 0.06, g);
+    mesh(rim, frame, sx * 0.047, 0, 0, g);
+    mesh(lens, lensM, sx * 0.047, 0, 0, g);
+    mesh(box(0.058, 0.009, 0.009), brow, sx * 0.047, 0.02, -0.001, g);      // 두꺼운 윗테
+    mesh(box(0.008, 0.012, 0.012), frame, sx * 0.078, 0.012, 0.002, g);      // 경첩
+    mesh(box(0.007, 0.01, 0.12), frame, sx * 0.081, 0.012, 0.062, g);        // 다리
   }
-  mesh(box(0.03, ai ? 0.01 : 0.005, ai ? 0.01 : 0.005), frame, 0, 0.012, 0, g);
+  mesh(box(0.018, 0.008, 0.007), frame, 0, 0.012, 0, g);                     // 코 다리
   if (ai) {
     // 오른쪽 경첩에 달린 동그란 초소형 카메라 (잘 보이게 크고 빛나게!)
     const c = new THREE.Group(); c.position.set(0.09, 0.016, -0.01); c.scale.setScalar(1.35); g.add(c);
@@ -997,7 +1020,7 @@ function startView(m) {
   hideUI();
   SND.bell();
   toast(V.role === "pro" ? "👮 당신은 <b>감독관</b>이에요!<br>AI 안경(동그란 카메라)과 초소형 카메라를 찾아 부수세요"
-    : "🧑‍🎓 당신은 <b>수험생</b>이에요!<br>G로 AI 안경을 몰래 끼우고 감독관에게 들키지 마세요", 4200);
+    : "🧑‍🎓 당신은 <b>수험생</b>이에요!<br>G로 AI 안경을 몰래 끼우고 감독관에게 들키지 마세요<br><small>숨긴 뒤 2초 동안은 검사하면 걸려요!</small>", 4200);
   renderHudTop();
 }
 function endGameView() {
