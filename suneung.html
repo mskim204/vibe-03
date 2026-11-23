@@ -125,7 +125,7 @@ const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
   #paper.away { transform: translate(-50%, 82%); opacity: .85; }
   #paper .ph { display: flex; justify-content: space-between; font: bold .8rem system-ui, sans-serif; color: #555; border-bottom: 2px solid #111;
     padding-bottom: 5px; margin-bottom: 8px; gap: 6px; }
-  #paper .q { font-size: 1.25rem; font-weight: bold; margin: 4px 0 10px; min-height: 1.6em; }
+  #paper .q { font-size: 1.1rem; font-weight: bold; margin: 4px 0 10px; min-height: 1.6em; line-height: 1.5; word-break: keep-all; }
   #paper .ch { display: flex; gap: 6px; }
   #paper .ch button { flex: 1; padding: 10px 2px; font-size: 1.05rem; border: 2px solid #ccc; border-radius: 10px; background: #fff; cursor: pointer;
     font-family: inherit; color: #111; }
@@ -1068,20 +1068,58 @@ function smashFx(sid, dev) {
 //               수험생 (내가 문제를 푸는 사람)
 // =====================================================
 let EX = null;
-function makeQuestion() {
-  let q, a;
-  switch (rnd(6)) {
-    case 0: { const x = irand(12, 49), y = irand(3, 9); q = `${x} × ${y} 의 값은?`; a = x * y; break; }
-    case 1: { const x = irand(23, 89), y = irand(14, 69), z = irand(11, 39); q = `${x} + ${y} − ${z} 의 값은?`; a = x + y - z; break; }
-    case 2: { const x = irand(11, 25); q = `${x}² 의 값은?`; a = x * x; break; }
-    case 3: { const k = irand(2, 9), x = irand(2, 12), b = irand(1, 30); q = `${k}x + ${b} = ${k * x + b} 일 때, x 의 값은?`; a = x; break; }
-    case 4: { const p = pick([10, 20, 25, 30, 40, 75]), n = pick([40, 60, 80, 120, 160, 200, 240]); q = `${n} 의 ${p}% 는?`; a = n * p / 100; break; }
-    default: { const x = irand(3, 9), y = irand(4, 9), z = irand(2, 9); q = `${x} × ${y} + ${z} × ${x} 의 값은?`; a = x * (y + z); break; }
+// 수능 킬러 문항 수준의 미적분 · 확률과 통계 문제 (AI 안경 없이는 거의 못 풀어요!)
+const gcd = (a, b) => b ? gcd(b, a % b) : Math.abs(a);
+const frac = (n, d) => { if (d < 0) { n = -n; d = -d; } const g = gcd(n, d) || 1; n /= g; d /= g; return d === 1 ? String(n) : `${n}/${d}`; };
+const nCr = (n, k) => { if (k < 0 || k > n) return 0; let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return Math.round(r); };
+const fact = n => n <= 1 ? 1 : n * fact(n - 1);
+function intWrong(a) {   // 정답과 아주 비슷한 오답들
+  const set = new Set([String(a)]);
+  while (set.size < 5) {
+    const d = pick([1, 2, 3, 4, 6, 8, 10, 12, 18, 24, 30]) * (Math.random() < 0.5 ? -1 : 1);
+    const v = Math.random() < 0.25 ? Math.round(a * pick([0.5, 2, 1.5])) : a + d;
+    if (v > 0) set.add(String(v));
   }
-  const set = new Set([a]);
-  while (set.size < 5) { const d = pick([1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) * (Math.random() < 0.5 ? -1 : 1); if (a + d >= 0) set.add(a + d); }
-  const ch = shuffle([...set]);
-  return { q, ch, ans: ch.indexOf(a) };
+  return [...set];
+}
+function fracWrong(n, d) {
+  const set = new Set([frac(n, d)]);
+  let guard = 0;
+  while (set.size < 5 && guard++ < 300) {
+    const nn = n + irand(-3, 3) * Math.max(1, Math.round(Math.abs(n) / 8)), dd = d + irand(-2, 2) * Math.max(1, Math.round(d / 8));
+    if (dd > 0 && nn > 0) set.add(frac(nn, dd));
+  }
+  while (set.size < 5) set.add(frac(n + set.size, d));
+  return [...set];
+}
+const QGEN = [
+  // ---------- 미적분 ----------
+  () => { const a = irand(2, 9); return { q: `[미적분] lim(x→0) (e^(${a}x) − 1 − ${a}x) / x² 의 값은?`, c: fracWrong(a * a, 2) }; },
+  () => { const a = irand(2, 8), b = irand(2, 7); return { q: `[미적분] lim(x→0) (1 − cos ${a}x) / (x · sin ${b}x) 의 값은?`, c: fracWrong(a * a, 2 * b) }; },
+  () => { const n = irand(3, 8); return { q: `[미적분] 함수 f(x) = x^${n} · ln x 에 대하여 f‴(1) 의 값은?`, c: intWrong(3 * n * n - 6 * n + 2) }; },
+  () => { const k = irand(2, 7); return { q: `[미적분] 급수 ∑(n=1→∞) n² / ${k}ⁿ 의 값은?`, c: fracWrong(k * (k + 1), (k - 1) ** 3) }; },
+  () => { const a = irand(2, 6); return { q: `[미적분] 곡선 y = x³ 과 직선 y = ${a * a}x 로 둘러싸인 부분의 넓이는?`, c: fracWrong(a ** 4, 2) }; },
+  () => { const a = irand(1, 4); return { q: `[미적분] lim(n→∞) ∑(k=1→n) (${a}/n)·(1 + ${a}k/n)² 의 값은?`, c: fracWrong((1 + a) ** 3 - 1, 3) }; },
+  () => { const a = irand(1, 9), b = irand(1, 9); return { q: `[미적분] f(x) = x³ + ${a}x + ${b} 의 역함수를 g(x)라 할 때, g′(${8 + 2 * a + b}) 의 값은?`, c: fracWrong(1, 12 + a) }; },
+  () => { const k = irand(1, 2), a = 4 * k; return { q: `[미적분] ∫(0→${a}) x·√(x² + ${9 * k * k}) dx 의 값은?`, c: fracWrong(98 * k ** 3, 3) }; },
+  // ---------- 확률과 통계 ----------
+  () => { const n = irand(5, 8); return { q: `[확률과 통계] 집합 X = {1, 2, …, ${n}} 에서 Y = {1, 2, 3} 으로의 함수 중 치역과 공역이 같은 함수의 개수는?`, c: intWrong(3 ** n - 3 * 2 ** n + 3) }; },
+  () => { const m = irand(4, 9), n = 2 * m + 4; return { q: `[확률과 통계] x + y + z + w = ${n} 을 만족시키는 홀수인 자연수 x, y, z, w 의 순서쌍의 개수는?`, c: intWrong(nCr(m + 3, 3)) }; },
+  () => { const n = pick([12, 18, 24, 30, 36]), k = pick([2, 3, 6]); return { q: `[확률과 통계] 확률변수 X 가 이항분포 B(${n}, 1/${k}) 를 따를 때, E(X²) 의 값은?`, c: fracWrong(n * (k - 1) + n * n, k * k) }; },
+  () => { const a = irand(3, 4), b = irand(3, 5), c = irand(1, 3); const v = fact(b + c) / (fact(b) * fact(c)) * nCr(b + c + 1, a);
+    return { q: `[확률과 통계] 문자 A ${a}개, B ${b}개, C ${c}개를 모두 일렬로 나열할 때, A 끼리는 서로 이웃하지 않도록 나열하는 경우의 수는?`, c: intWrong(v) }; },
+  () => { const r = irand(5, 8), w = irand(3, 6); const all3 = nCr(r, 3), two = nCr(r, 2) * w;
+    return { q: `[확률과 통계] 빨간 공 ${r}개, 흰 공 ${w}개가 든 주머니에서 3개를 동시에 꺼낼 때, 빨간 공이 2개 이상이었다. 3개 모두 빨간 공일 확률은?`, c: fracWrong(all3, all3 + two) }; },
+  () => { const n = irand(6, 10); return { q: `[확률과 통계] ${n}명이 원탁에 둘러앉을 때, 특정한 두 사람 A, B 가 이웃하지 않는 경우의 수는?`, c: intWrong(fact(n - 1) - 2 * fact(n - 2)) }; },
+  () => { const n = irand(7, 20); return { q: `[확률과 통계] 1부터 ${n}까지 적힌 카드 ${n}장 중 2장을 동시에 뽑을 때, 큰 수를 X 라 하자. E(X) 의 값은?`, c: fracWrong(2 * (n + 1), 3) }; },
+  () => { const m = irand(10, 30), sg = pick([4, 6, 8, 10]), n = pick([4, 16, 64]);
+    return { q: `[확률과 통계] 모평균 ${m}, 모표준편차 ${sg} 인 모집단에서 크기 ${n} 인 표본의 표본평균 X̄ 에 대하여 E(X̄²) 의 값은?`, c: fracWrong(m * m * n + sg * sg, n) }; }
+];
+function makeQuestion() {
+  const g = pick(QGEN)();
+  const ans = g.c[0];
+  const ch = shuffle(g.c.slice(0, 5));
+  return { q: g.q, ch, ans: ch.indexOf(ans) };
 }
 function startExam() {
   EX = { g: 1, sf: 1, swTo: -1, swP: 0, cam: 0, actT: 0, yaw: 0, pitch: -0.75, qs: Array.from({ length: V.total }, makeQuestion), qi: 0, solved: 0,
@@ -1098,7 +1136,7 @@ function renderPaper() {
     <div class="ph"><span>2027학년도 대학수학능력시험 · 수학 영역</span><span>✏️ ${EX.solved} / ${V.total}</span></div>
     ${EX.caught ? `<div class="q" style="color:#b91c1c">🚫 부정행위로 시험이 무효가 되었어요</div>` : done ? `<div class="q" style="color:#15803d">✅ 다 풀었어요! 시험이 끝날 때까지 들키지 마세요</div>` : `
     <div class="q">${EX.qi + 1}. ${esc(q.q)}</div>
-    <div class="ch">${q.ch.map((v, i) => `<button id="ch${i}" onclick="answer(${i})">${CIRCLED[i]} ${v}</button>`).join("")}</div>`}
+    <div class="ch">${q.ch.map((v, i) => `<button id="ch${i}" onclick="answer(${i})">${CIRCLED[i]} ${esc(v)}</button>`).join("")}</div>`}
     <div class="tools">
       <button id="tgl" class="${EX.g === 2 ? "ai" : ""}" onclick="swapGlasses()" ${EX.caught || swapping ? "disabled" : ""}>👓 ${EX.g === 2 ? "AI 안경 쓰는 중" : "일반 안경"} (G)</button>
       <button id="tcam" class="${EX.cam ? "camon" : ""}" onclick="toggleCam()" ${EX.caught ? "disabled" : ""}>📷 카메라 ${EX.cam ? "켜짐" : "꺼짐"} (C)</button>
