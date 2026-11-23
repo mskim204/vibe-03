@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>수능 감독관</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+// ===============================
+// 🕶️ 수능 감독관 — AI 안경과 초소형 카메라를 찾아서 부숴라!
+//  · 감독관: 교실을 걸어 다니며 AI 안경 / 초소형 카메라를 쓰는 수험생을 찾아 검사(클릭)해요.
+//  · 수험생: AI 안경을 몰래 갈아 끼우거나 카메라를 켜서 문제를 풀고, 끝까지 안 들키면 성공!
+// ===============================
+const ROOM_PREFIX = "vibe03-suneung/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
+const MAX_PEOPLE = 17;                  // 감독관 1명 + 수험생 16명
+const SEATS = 16;                       // 교실 자리 (빈 자리는 AI 수험생이 채워요)
+const SWAP = 1.4;                       // 안경 갈아 끼우는 데 걸리는 시간(초)
+const RANGE = 2.6;                      // 감독관이 검사할 수 있는 거리(m)
+const FREEZE = 4;                       // 잘못 검사했을 때 사과하느라 못 움직이는 시간(초)
+const BROKERS = [
+  { url: "wss://mqtt.eclipseprojects.io/mqtt" },
+  { url: "wss://public.cloud.shiftr.io", username: "public", password: "public" },
+  { url: "wss://broker.emqx.io:8084/mqtt" },
+  { url: "wss://broker.hivemq.com:8884/mqtt" }
+];
+const LOOK = {
+  skin:  [0xf6d3b3, 0xeec39a, 0xe0ac7e, 0xc68e5d, 0xf9dcc4],
+  hair:  [0x1c1917, 0x292524, 0x44403c, 0x5b3a1e, 0x78350f, 0x111827],
+  shirt: [0xf8fafc, 0x1e3a8a, 0x334155, 0x166534, 0x7f1d1d, 0x6b21a8, 0x0f766e, 0x9a3412, 0xe2e8f0],
+  style: ["short", "long", "bob", "buzz", "pony"]
+};
+// 책상 자리 (4줄 × 4줄). 수험생은 모두 칠판(-z) 쪽을 봐요
+const COLS = [-3.3, -1.1, 1.1, 3.3], ROWS = [-3.0, -0.8, 1.4, 3.6];
+const seatPos = sid => ({ x: COLS[sid % 4], z: ROWS[Math.floor(sid / 4)] });
+// 교실 벽
+const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
+// ===============================
+</script>
+<style>
+  :root { --line: #e2e8f0; --text: #0f172a; --sub: #64748b; --main: #4338ca; --ai: #22d3ee; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0f172a; color: var(--text);
+    font-family: system-ui, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; touch-action: none; transition: filter .15s; }
+  /* 메뉴 · 대기실 화면 */
+  #ui { position: fixed; inset: 0; overflow-y: auto; background: linear-gradient(160deg, #1e1b4b, #0f172a 55%, #134e4a); z-index: 20; }
+  #ui.over { background: #0f172acc; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 16px 16px 40px; }
+  h1 { color: #fff; text-align: center; margin: 10px 0 4px; font-size: 1.7rem; }
+  .tag { color: #a5b4fc; text-align: center; margin: 0 0 14px; font-size: .95rem; }
+  h2 { margin: 0 0 10px; font-size: 1.15rem; }
+  .card { background: #fff; border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+  .center { text-align: center; }
+  .sub { color: var(--sub); font-size: .9rem; line-height: 1.5; }
+  label.field { display: block; font-weight: bold; margin: 0 0 6px; }
+  input[type=text] { width: 100%; padding: 12px; font-size: 1.05rem; border: 2px solid var(--line); border-radius: 10px; }
+  .btn { display: block; width: 100%; padding: 14px; font-size: 1.05rem; font-weight: bold; border: 0; border-radius: 10px;
+    cursor: pointer; color: #fff; background: var(--main); margin-top: 10px; }
+  .btn:disabled { background: #94a3b8; cursor: default; }
+  .btn.gray { background: #475569; } .btn.teal { background: #0f766e; } .btn.red { background: #dc2626; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg button { flex: 1; min-width: 52px; padding: 10px 6px; font-size: 1rem; font-weight: bold; border: 2px solid var(--line);
+    background: #f8fafc; border-radius: 10px; cursor: pointer; color: var(--text); }
+  .seg button.on { background: var(--main); border-color: var(--main); color: #fff; }
+  .seg button:disabled { cursor: default; }
+  .net { border-radius: 10px; padding: 10px; text-align: center; font-size: .9rem; margin-bottom: 12px; color: #fff; }
+  .net.wait { background: #a16207; } .net.ok { background: #15803d; } .net.fail, .net.lib { background: #b91c1c; }
+  .err { color: #fca5a5; text-align: center; font-weight: bold; min-height: 1.2em; }
+  .notice { margin-top: 8px; background: #eef2ff; border-radius: 8px; padding: 8px; font-size: .9rem; }
+  .roomtop { display: flex; gap: 14px; align-items: center; }
+  .qr { width: 132px; height: 132px; flex: 0 0 132px; background: #fff; border-radius: 8px; }
+  .qr svg { width: 100%; height: 100%; display: block; }
+  .code { font-size: 2.6rem; font-weight: 900; letter-spacing: 6px; color: var(--main); font-family: ui-monospace, monospace; }
+  .players { display: flex; flex-wrap: wrap; gap: 6px; }
+  .players span { background: #eef2ff; border-radius: 999px; padding: 6px 12px; font-size: .95rem; }
+  .rules { margin: 0; padding-left: 18px; line-height: 1.6; font-size: .92rem; }
+  table.res { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  table.res td { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+  .big { font-size: 2rem; font-weight: 900; text-align: center; margin: 4px 0 6px; }
+
+  /* 게임 화면 위에 띄우는 것들 */
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 10; color: #fff; }
+  #hud .top { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap; justify-content: center; width: calc(100% - 20px); }
+  .pill { background: #0f172acc; border-radius: 999px; padding: 7px 14px; font-weight: bold; font-size: .95rem; white-space: nowrap; }
+  .pill.time { font-family: ui-monospace, monospace; font-size: 1.15rem; }
+  .pill.warn { background: #b91c1ccc; }
+  #cross { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
+  #cross::before, #cross::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 3px #000; }
+  #cross::before { left: 10px; top: 0; width: 2px; height: 22px; } #cross::after { top: 10px; left: 0; height: 2px; width: 22px; }
+  #cross.hot::before, #cross.hot::after { background: #f87171; }
+  #aim { position: absolute; left: 50%; top: calc(50% + 22px); transform: translateX(-50%); background: #0f172acc; padding: 5px 12px;
+    border-radius: 8px; font-size: .9rem; display: none; white-space: nowrap; }
+  #toast { position: fixed; z-index: 30; color: #fff; pointer-events: none; left: 50%; top: 64px; transform: translateX(-50%); background: #0f172ae6; padding: 10px 18px; border-radius: 12px;
+    font-weight: bold; font-size: 1.05rem; opacity: 0; transition: opacity .25s; text-align: center; max-width: 90%; }
+  #toast.show { opacity: 1; }
+  #help { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); background: #0f172aaa; padding: 6px 12px; border-radius: 8px;
+    font-size: .85rem; white-space: nowrap; }
+  #lockhint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer; }
+  #lockhint div { background: #0f172ae6; padding: 18px 26px; border-radius: 14px; font-size: 1.15rem; font-weight: bold; text-align: center; line-height: 1.6; }
+  #hammer { position: absolute; right: 18%; bottom: 14%; font-size: 120px; opacity: 0; transform-origin: 80% 80%; }
+  #hammer.swing { animation: swing .45s ease-out; }
+  @keyframes swing { 0% { opacity: 1; transform: rotate(-60deg); } 50% { opacity: 1; transform: rotate(25deg); } 100% { opacity: 0; transform: rotate(10deg); } }
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity .4s; }
+  #frozen { position: absolute; inset: 0; background: #7f1d1d55; display: none; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; }
+  /* 안경 · AI 화면 */
+  #lens { position: absolute; inset: 0; display: none; }
+  #lens.normal { display: block; background: radial-gradient(ellipse 60% 70% at 50% 50%, transparent 82%, #0007 97%); }
+  #lens.ai { display: block; background: radial-gradient(ellipse 60% 70% at 50% 50%, transparent 72%, #0891b255 90%, #000a 99%); }
+  #lens.ai::after { content: "◉ AI GLASS  REC"; position: absolute; top: 58px; right: 14px; color: var(--ai); font: bold .85rem ui-monospace, monospace;
+    text-shadow: 0 0 6px #0ff; }
+  #aibox { position: absolute; left: 12px; top: 58px; background: #083344dd; border: 2px solid var(--ai); color: #cffafe; border-radius: 10px;
+    padding: 8px 12px; font: bold 1rem ui-monospace, monospace; display: none; box-shadow: 0 0 14px #22d3ee88; }
+  #aibox.cam { border-color: #f87171; background: #450a0add; color: #fee2e2; box-shadow: 0 0 14px #f8717188; }
+  #swapfx { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: bold;
+    background: #0004; }
+  /* 시험지 */
+  #paper { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: min(640px, 100%); pointer-events: auto;
+    background: #fdfcf7; color: #111; border-radius: 14px 14px 0 0; padding: 12px 14px 12px; box-shadow: 0 -6px 24px #0008;
+    transition: transform .25s, opacity .25s; display: none; font-family: "Batang", "Nanum Myeongjo", serif; }
+  #paper.away { transform: translate(-50%, 82%); opacity: .85; }
+  #paper .ph { display: flex; justify-content: space-between; font: bold .8rem system-ui, sans-serif; color: #555; border-bottom: 2px solid #111;
+    padding-bottom: 5px; margin-bottom: 8px; gap: 6px; }
+  #paper .q { font-size: 1.25rem; font-weight: bold; margin: 4px 0 10px; min-height: 1.6em; }
+  #paper .ch { display: flex; gap: 6px; }
+  #paper .ch button { flex: 1; padding: 10px 2px; font-size: 1.05rem; border: 2px solid #ccc; border-radius: 10px; background: #fff; cursor: pointer;
+    font-family: inherit; color: #111; }
+  #paper .ch button.hint { border-color: var(--ai); box-shadow: 0 0 12px #22d3ee; background: #ecfeff; }
+  #paper .ch button.hintc { border-color: #f87171; box-shadow: 0 0 12px #f87171; background: #fef2f2; }
+  #paper .tools { display: flex; gap: 6px; margin-top: 9px; font-family: system-ui, sans-serif; }
+  #paper .tools button { flex: 1; padding: 9px 4px; font-size: .9rem; font-weight: bold; border: 0; border-radius: 10px; cursor: pointer; color: #fff; background: #334155; }
+  #paper .tools button.ai { background: #0e7490; } #paper .tools button.camon { background: #b91c1c; }
+  #paper .msg { font: bold .9rem system-ui, sans-serif; min-height: 1.3em; margin-top: 6px; text-align: center; }
+  #awayhint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); background: #0f172acc; padding: 6px 12px; border-radius: 8px;
+    font-size: .85rem; display: none; text-align: center; width: max-content; max-width: 92%; }
+  @media (max-width: 600px) { #toast { top: 112px; font-size: .92rem; padding: 8px 14px; } #aibox { top: 104px; } #lens.ai::after { top: 104px; } }
+  #caughtbox { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); background: #991b1bee; padding: 18px 26px; border-radius: 16px;
+    font-size: 1.3rem; font-weight: bold; text-align: center; display: none; line-height: 1.6; }
+  /* 휴대폰 조작 */
+  #joy { position: absolute; left: 22px; bottom: 26px; width: 130px; height: 130px; border-radius: 50%; background: #ffffff22; border: 2px solid #ffffff55;
+    display: none; pointer-events: auto; touch-action: none; }
+  #joy i { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: #ffffffaa; }
+  #inspectBtn { position: absolute; right: 22px; bottom: 34px; width: 104px; height: 104px; border-radius: 50%; border: 0; background: #dc2626dd;
+    color: #fff; font-size: 1.1rem; font-weight: bold; display: none; pointer-events: auto; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud">
+  <div id="lens"></div>
+  <div class="top" id="hudtop"></div>
+  <div id="cross"></div>
+  <div id="aim"></div>
+  <div id="aibox"></div>
+  <div id="swapfx">👓 안경 바꾸는 중...</div>
+  <div id="hammer">🔨</div>
+  <div id="flash"></div>
+  <div id="frozen">😓 무고한 수험생이었어요! 사과하는 중...</div>
+  <div id="help"></div>
+  <div id="awayhint">고개를 돌리면 시험지를 못 봐요 · <b>R</b> 또는 화면 두 번 탭: 시험지 보기</div>
+  <div id="paper"></div>
+  <div id="caughtbox"></div>
+  <div id="joy"><i></i></div>
+  <button id="inspectBtn">🔍<br>검사</button>
+  <div id="lockhint"><div>🖱️ 화면을 클릭하면 시작해요<br><small>WASD 이동 · 마우스로 보기 · 클릭으로 검사 · ESC 마우스 풀기</small></div></div>
+</div>
+<div id="ui"></div>
+<div id="toast"></div>
+
+<script>
+// ---------- 작은 도구들 ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const rnd = n => Math.floor(Math.random() * n);
+const rand = (a, b) => a + Math.random() * (b - a);
+const irand = (a, b) => a + rnd(b - a + 1);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const pick = a => a[rnd(a.length)];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const num = (v, d = 0) => (typeof v === "number" && isFinite(v)) ? v : d;
+const r2 = v => Math.round(v * 100) / 100;
+const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const fmtTime = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const CIRCLED = ["①", "②", "③", "④", "⑤"];
+function show(html, over) { const u = $("ui"); u.style.display = "block"; u.className = over ? "over" : ""; u.innerHTML = `<div class="wrap">${html}</div>`; }
+function hideUI() { $("ui").style.display = "none"; }
+let toastTimer = 0;
+function toast(msg, ms = 1800) { const t = $("toast"); t.innerHTML = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), ms); }
+
+// 이름은 이 기기에 기억해 둬요
+let me = { name: "" };
+try { me.name = (JSON.parse(localStorage.getItem("vibe03-suneung")) || {}).name || ""; } catch (e) {}
+function saveName() {
+  const n = $("name"); if (!n) return;
+  me.name = n.value.trim().slice(0, 8);
+  try { localStorage.setItem("vibe03-suneung", JSON.stringify({ name: me.name })); } catch (e) {}
+}
+const cleanName = n => String(n || "").trim().slice(0, 8);
+
+// QR로 들어오면 주소에 방 코드가 붙어 있어요 (…suneung.html?code=AB12)
+let joinCode = (new URLSearchParams(location.search).get("code") || "").toUpperCase().slice(0, 4);
+let notice = joinCode ? `📷 방 <b>${esc(joinCode)}</b>에 들어가려면 이름을 쓰고 '방 들어가기'를 누르세요` : "";
+if (joinCode) { try { history.replaceState(null, "", location.pathname); } catch (e) {} }
+const roomLink = code => location.href.split(/[?#]/)[0] + "?code=" + code;
+function qrImage(text) {
+  if (typeof qrcode === "undefined") return "";
+  const q = qrcode(0, "M"); q.addData(text); q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
+
+// ---------- 소리 ----------
+let AC = null;
+function audio() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (AC && AC.state === "suspended") AC.resume(); return AC; }
+function tone(freq, dur, type = "sine", vol = 0.2, delay = 0) {
+  const a = audio(); if (!a) return;
+  const t = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+function noise(dur, vol = 0.3, hp = 1500) {
+  const a = audio(); if (!a) return;
+  const buf = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+  const s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  s.buffer = buf; f.type = "highpass"; f.frequency.value = hp; g.gain.value = vol;
+  s.connect(f).connect(g).connect(a.destination); s.start();
+}
+const SND = {
+  bell() { tone(784, 1.2, "sine", 0.25); tone(659, 1.4, "sine", 0.25, 0.55); },
+  smash() { noise(0.35, 0.5, 900); for (let i = 0; i < 7; i++) tone(2400 + Math.random() * 2600, 0.15, "triangle", 0.06, 0.05 + i * 0.05); },
+  wrong() { tone(160, 0.45, "square", 0.12); },
+  ok() { tone(880, 0.12, "sine", 0.15); tone(1320, 0.18, "sine", 0.15, 0.1); },
+  bad() { tone(220, 0.25, "sawtooth", 0.1); },
+  step(v) { tone(90 + Math.random() * 30, 0.06, "triangle", 0.05 + v * 0.25); },
+  alarm() { for (let i = 0; i < 4; i++) tone(i % 2 ? 660 : 880, 0.2, "square", 0.1, i * 0.22); }
+};
+
+// ---------- 연결 (공개 MQTT 서버로 친구들과 이어져요) ----------
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const myId = Math.random().toString(36).slice(2, 10);
+const URLS = window.BROKER_TEST || BROKERS;   // BROKER_TEST는 테스트할 때만 써요
+let brokers = [], waiters = [], netState = "wait", net = null, isHost = false, joined = false;
+function connectBrokers() {
+  if (typeof mqtt === "undefined") {
+    const sc = document.createElement("script");
+    sc.src = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
+    sc.onload = connectBrokers;
+    sc.onerror = () => { netState = "lib"; showNet(); };
+    document.head.appendChild(sc);
+    return;
+  }
+  setTimeout(() => { if (netState === "wait") { netState = "fail"; showNet(); } }, 12000);
+  brokers = URLS.map((o, i) => {
+    const b = { ready: false };
+    b.client = mqtt.connect(o.url, { clientId: "sn" + myId + i, username: o.username, password: o.password, connectTimeout: 10000, reconnectPeriod: 3000 });
+    b.client.on("connect", () => { b.ready = true; netState = "ok"; showNet(); waiters = waiters.filter(w => !w()); });
+    b.client.on("close", () => { b.ready = false; if (!brokers.some(x => x.ready) && netState === "ok") { netState = "wait"; showNet(); } });
+    b.client.on("message", (t, buf) => onMessage(i, t, buf));
+    return b;
+  });
+}
+function whenBroker(want, f, fail) {
+  const w = () => {
+    const i = want >= 0 ? want : brokers.findIndex(b => b.ready);
+    if (i < 0 || !brokers[i] || !brokers[i].ready) return false;
+    f(i); return true;
+  };
+  if (w()) return;
+  waiters.push(w);
+  setTimeout(() => { if (waiters.includes(w)) { waiters = waiters.filter(x => x !== w); fail(); } }, 12000);
+}
+const topic = (code, who) => ROOM_PREFIX + code + "/" + who;
+function pub(to, m, fast) { if (net) brokers[net.b].client.publish(topic(net.code, to), JSON.stringify(m), { qos: fast ? 0 : 1 }); }
+function newCode(b) {   // 첫 글자로 어느 서버인지 알 수 있게 만들어요
+  const first = CODE_CHARS.split("").filter((c, i) => i % URLS.length === b);
+  return pick(first) + Array.from({ length: 3 }, () => pick(CODE_CHARS)).join("");
+}
+const brokerOf = code => { const i = CODE_CHARS.indexOf(code[0]); return i < 0 ? -1 : i % URLS.length; };
+function enterRoom(b, code, done) {
+  net = { b, code, mine: topic(code, isHost ? "host" : "p/" + myId), all: topic(code, "all"), seen: {}, hostSeen: Date.now() };
+  const subs = isHost ? [net.mine] : [net.mine, net.all];
+  brokers[b].client.subscribe(subs, { qos: 1 }, () => done && done());
+  net.timer = setInterval(heartbeat, 3000);
+}
+function leaveRoom() {
+  if (!net) return;
+  if (isHost) pub("all", { t: "error", msg: "방장이 방을 나갔어요." });
+  else pub("host", { t: "leave", from: myId });
+  brokers[net.b].client.unsubscribe(isHost ? [net.mine] : [net.mine, net.all]);
+  clearInterval(net.timer); clearTimeout(net.joinTimer);
+  net = null;
+}
+function heartbeat() {
+  if (!net) return;
+  const now = Date.now();
+  if (isHost) {
+    room.players.forEach(p => { if (p.pid !== "host" && !p.gone && now - (net.seen[p.pid] || now) > 12000) playerLeft(p.pid); });
+    if (room.phase !== "play") pub("all", { t: "hb" }, true);
+  } else {
+    pub("host", { t: "ping", from: myId }, true);
+    if (now - net.hostSeen > 12000) menu("방장과 연결이 끊겼어요.");
+  }
+}
+function onMessage(i, t, buf) {
+  if (!net || i !== net.b || (t !== net.mine && t !== net.all)) return;
+  let m; try { m = JSON.parse(buf.toString()); } catch (e) { return; }
+  if (!m || typeof m !== "object") return;
+  if (isHost) { if (typeof m.from === "string" && m.from.length < 20 && m.from !== "host") hostHandle(m.from, m); }
+  else { net.hostSeen = Date.now(); clientHandle(m); }
+}
+// 방장 → 내 화면, 참가자 → 방장에게 보내요
+function send(m, fast) { if (isHost) hostHandle("host", m); else pub("host", { ...m, from: myId }, fast); }
+function toAll(m, fast) { pub("all", m, fast); clientHandle(m); }   // 방장이 모두에게 (자기 화면 포함)
+
+// ---------- 처음 메뉴 ----------
+function menu(err = "") {
+  endGameView();
+  if (G) clearInterval(G.loop);
+  leaveRoom();
+  isHost = false; joined = false; room = null; G = null; L = null;
+  show(`
+    <h1>🕶️ 수능 감독관</h1>
+    <p class="tag">AI 안경 · 초소형 카메라를 찾아서 부숴라!</p>
+    <div class="card">
+      <label class="field">내 이름</label>
+      <input type="text" id="name" maxlength="8" placeholder="이름을 써 주세요" value="${esc(me.name)}">
+      ${notice ? `<div class="notice">${notice}</div>` : ""}
+    </div>
+    <div class="net" id="net"></div>
+    <div class="card">
+      <button class="btn" style="margin-top:0" onclick="createRoom()">🏠 방 만들기</button>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="code" maxlength="4" placeholder="방 코드 4자리" style="text-transform:uppercase" value="${esc(joinCode)}">
+        <button class="btn teal" style="margin:0;flex:0 0 140px" onclick="joinRoom()">🚪 방 들어가기</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📖 게임 방법</h2>
+      <ul class="rules">
+        <li>시작하면 <b>감독관 1명</b>이 정해지고, 나머지는 모두 <b>수험생</b>이 돼요.</li>
+        <li>빈 자리(16자리)는 <b>AI 수험생</b>이 채워요. AI 중에는 몰래 AI 안경·카메라를 쓰는 애도, 정직한 애도 있어요.</li>
+        <li>🧑‍🎓 <b>수험생</b>: <b>G</b>로 일반 안경 ↔ <b>AI 안경</b>을 갈아 끼우면 정답이 보여요. <b>C</b>는 초소형 카메라.
+          끝까지 안 들키고 <b>모든 문제를 풀면 성공!</b></li>
+        <li>👮 <b>감독관</b>: 걸어 다니며 수상한 수험생을 가까이서 <b>검사</b>해요. AI 안경에는 <b>동그란 카메라</b>가 달려 있어요.
+          들키면 장비를 부숴요! 정직한 학생을 검사하면 4초 동안 사과해야 해요.</li>
+      </ul>
+    </div>
+    <div class="err">${esc(err)}</div>`);
+  showNet();
+}
+function showNet() {
+  const el = $("net"); if (!el) return;
+  el.className = "net " + netState;
+  el.innerHTML = {
+    wait: "🟡 서버에 연결하는 중...",
+    ok: "🟢 서버 연결됨",
+    fail: "🔴 서버에 연결할 수 없어요<br><small>학교·회사 인터넷에서 막혔을 수 있어요. 휴대폰 데이터로 해 보세요.</small>",
+    lib: "🔴 연결 프로그램을 불러오지 못했어요<br><small>인터넷이 연결되어 있는지 확인하고 새로고침해 보세요.</small>"
+  }[netState];
+}
+
+// ---------- 방장: 방 만들기 ----------
+let room = null;   // 방장만 가지고 있는 방 정보
+let G = null;      // 방장만 가지고 있는 시험 진행 정보
+function createRoom() {
+  saveName(); audio();
+  show(`<div class="card center"><h2>🏠 방을 만드는 중...</h2></div>`);
+  whenBroker(-1, b => {
+    isHost = true; joined = true;
+    const code = newCode(b);
+    room = { code, minutes: 3, aiPro: false, phase: "lobby", players: [{ pid: "host", name: me.name || "방장" }] };
+    enterRoom(b, code, () => sendLobby());
+  }, () => menu("서버에 연결할 수 없어요. 학교·회사 인터넷에서 막혔을 수 있어요."));
+}
+function lobbyMsg() {
+  return { t: "lobby", code: room.code, minutes: room.minutes, aiPro: room.aiPro,
+    players: room.players.filter(p => !p.gone).map(p => ({ pid: p.pid, name: p.name })) };
+}
+function sendLobby() { if (room && room.phase === "lobby") toAll(lobbyMsg()); }
+function setMinutes(n) { if (!isHost || room.phase !== "lobby") return; room.minutes = clamp(n, 1, 5); sendLobby(); }
+function setAiPro(v) { if (!isHost || room.phase !== "lobby") return; room.aiPro = !!v; sendLobby(); }
+
+// ---------- 참가자: 방 들어가기 ----------
+function joinRoom() {
+  saveName(); audio();
+  const code = $("code").value.trim().toUpperCase();
+  joinCode = ""; notice = "";
+  if (code.length !== 4) return menu("방 코드 4자리를 써 주세요.");
+  const b = brokerOf(code);
+  if (b < 0) return menu("그런 방이 없어요. 방 코드를 확인해 주세요.");
+  show(`<div class="card center"><h2>🔌 방 ${esc(code)}에 들어가는 중...</h2></div>`);
+  whenBroker(b, () => {
+    enterRoom(b, code, () => {
+      net.joinTimer = setTimeout(() => menu("그런 방이 없어요. 방 코드를 확인해 주세요."), 7000);
+      pub("host", { t: "join", from: myId, name: me.name });
+    });
+  }, () => menu("서버에 연결할 수 없어요. 학교·회사 인터넷에서 막혔을 수 있어요."));
+}
+
+// ---------- 방장: 받은 메시지 처리 ----------
+function hostHandle(from, m) {
+  if (!room) return;
+  if (from !== "host") net.seen[from] = Date.now();
+  const p = room.players.find(x => x.pid === from && !x.gone);
+  const play = room.phase === "play" && G;
+  switch (m.t) {
+    case "join":
+      if (p) return pub("p/" + from, { t: "welcome", lobby: lobbyMsg() });
+      if (room.phase !== "lobby") return pub("p/" + from, { t: "error", msg: "이미 시험이 시작된 방이에요. 끝나면 다시 들어와 주세요." });
+      if (room.players.filter(x => !x.gone).length >= MAX_PEOPLE) return pub("p/" + from, { t: "error", msg: "방이 꽉 찼어요. (최대 17명)" });
+      room.players.push({ pid: from, name: cleanName(m.name) || "수험생" + room.players.length });
+      pub("p/" + from, { t: "welcome", lobby: lobbyMsg() });
+      sendLobby();
+      break;
+    case "leave": if (p) playerLeft(from); break;
+    case "pr": if (play && G.proctor === from) setProPose(m); break;
+    case "ex": if (play && p) examReport(from, m); break;
+    case "inspect": if (play && G.proctor === from) doInspect(m.sid); break;
+  }
+}
+function playerLeft(pid) {
+  const p = room.players.find(x => x.pid === pid);
+  if (!p || p.gone) return;
+  if (room.phase === "lobby") { room.players = room.players.filter(x => x !== p); return sendLobby(); }
+  p.gone = true;
+  if (!G) return;
+  if (G.proctor === pid) {   // 감독관이 나가면 AI 감독관이 이어서 해요
+    G.proctor = "ai"; G.ai = newAI(); toAll({ t: "fx", k: "proleft", name: p.name });
+  }
+  const s = G.students.find(x => x.pid === pid);
+  if (s) { s.pid = null; s.kind = "honest"; s.g = s.base = 1; s.swTo = -1; s.cam = 0; s.act = 0; s.timer = rand(6, 15); }
+}
+
+// ---------- 방장: 시험 시작 ----------
+function hostStart() {
+  if (!isHost || room.phase !== "lobby") return;
+  const humans = room.players.filter(p => !p.gone);
+  if (room.aiPro && humans.length > SEATS) return toast("AI 감독관일 때는 수험생이 16명까지예요.");
+  const proctor = room.aiPro ? "ai" : pick(humans).pid;
+  const exams = shuffle(humans.filter(p => p.pid !== proctor));
+  const seats = shuffle([...Array(SEATS).keys()]);
+  const total = room.minutes * 3 + 2;   // 1분 5문제 … 5분 17문제
+  const students = new Array(SEATS);
+  exams.forEach((p, i) => students[seats[i]] = newStudent(seats[i], "human", p.pid, total));
+  const botSeats = seats.slice(exams.length);
+  const n = botSeats.length;
+  const nCheat = n === 0 ? 0 : n <= 3 ? 1 : Math.max(2, Math.round(n * 0.35));
+  botSeats.forEach((sid, i) => students[sid] = newStudent(sid, i < nCheat ? (Math.random() < 0.7 ? "cheatG" : "cheatC") : "honest", null, total));
+  G = { proctor, students, total, strikes: 0, endAt: Date.now() + room.minutes * 60000, last: performance.now(), sendT: 0, endSoon: 0,
+    pro: { x: 0, z: -5.2, yaw: Math.PI, pitch: -0.15, frozen: 0 }, ai: newAI() };
+  room.phase = "play";
+  toAll({ t: "go", proctor, total, endIn: room.minutes * 60000,
+    names: Object.fromEntries(humans.map(p => [p.pid, p.name])),
+    students: students.map(s => ({ sid: s.sid, look: s.look, pid: s.pid })) });
+  clearInterval(G.loop); G.loop = setInterval(hostTick, 50);
+}
+function newStudent(sid, kind, pid, total) {
+  const { x, z } = seatPos(sid);
+  const base = kind === "human" ? 1 : (Math.random() < 0.55 ? 1 : 0);   // 1 일반 안경 · 0 안경 안 씀
+  const s = { sid, kind, pid, x, z, base, g: base, swFrom: base, swTo: -1, swP: 0, cam: 0, act: 0, actT: 0, yaw: 0, pitch: -0.6,
+    ty: 0, tp: -0.6, lookT: rand(0, 3), caught: false, solved: 0, total, timer: rand(2, 9), alarm: 0,
+    react: rand(0.25, 1.3), careless: Math.random() < 0.2, nervous: Math.random() < 0.5, susp: 0,
+    look: [rnd(LOOK.skin.length), rnd(LOOK.hair.length), rnd(LOOK.shirt.length), rnd(LOOK.style.length)] };
+  if (kind === "cheatG" && Math.random() < 0.3) { s.g = 2; s.timer = rand(3, 8); }   // 처음부터 AI 안경을 쓰고 있는 애도 있어요
+  if (kind === "cheatC" && Math.random() < 0.3) { s.cam = 1; s.timer = rand(3, 8); }
+  return s;
+}
+// 지금 부정행위 장비를 쓰는 중인지 (안경을 바꾸는 중에 AI 안경을 손에 들고 있어도 걸려요)
+const cheating = s => s.g === 2 || s.cam === 1 || (s.swTo >= 0 && (s.swTo === 2 || s.swFrom === 2));
+
+function setProPose(m) {
+  const P = G.pro;
+  P.x = clamp(num(m.x, P.x), ROOM.x0, ROOM.x1); P.z = clamp(num(m.z, P.z), ROOM.z0, ROOM.z1);
+  P.yaw = num(m.yaw, P.yaw); P.pitch = clamp(num(m.pitch, P.pitch), -1.5, 1.5); P.mv = num(m.mv, 0);
+}
+function examReport(pid, m) {
+  const s = G.students.find(x => x.pid === pid);
+  if (!s || s.caught) return;
+  const gv = v => [0, 1, 2].includes(v) ? v : null;
+  const g = gv(m.g), swTo = m.swTo === -1 ? -1 : gv(m.swTo);
+  if (g === null || swTo === null) return;
+  if (swTo >= 0 && s.swTo < 0) { s.swP = 0; s.swFrom = gv(m.sf) ?? s.g; }
+  s.g = g; s.swTo = swTo; if (swTo < 0) s.swP = 0;
+  s.cam = m.cam ? 1 : 0; s.act = m.act === 2 ? 2 : 0;
+  s.yaw = clamp(num(m.yaw), -2.5, 2.5); s.pitch = clamp(num(m.pitch, -0.6), -1.2, 0.6);
+  s.solved = clamp(Math.floor(num(m.solved)), 0, s.total);
+}
+function doInspect(sid) {
+  const s = G.students[sid], P = G.pro;
+  if (!s || s.caught || P.frozen > 0) return;
+  if (Math.hypot(s.x - P.x, s.z - P.z) > RANGE + 0.9) return;
+  if (cheating(s)) catchStudent(s, "pro");
+  else { G.strikes++; P.frozen = FREEZE; toAll({ t: "fx", k: "wrong", sid }); }
+}
+function catchStudent(s, by) {
+  const dev = s.g === 2 || s.swTo === 2 || s.swFrom === 2 ? "glasses" : "cam";
+  s.caught = true; s.g = 0; s.swTo = -1; s.swP = 0; s.cam = 0; s.act = 0;
+  toAll({ t: "fx", k: "smash", sid: s.sid, dev, by });
+}
+
+// ---------- 방장: 매 순간 진행 ----------
+function hostTick() {
+  if (!room || room.phase !== "play" || !G) return;
+  const now = performance.now(), dt = Math.min(0.25, (now - G.last) / 1000); G.last = now;
+  const P = G.pro;
+  if (P.frozen > 0) P.frozen = Math.max(0, P.frozen - dt);
+  if (G.proctor === "ai") aiProctorTick(dt);
+  for (const s of G.students) {
+    if (s.caught) { s.yaw *= 0.9; s.pitch = -0.7; continue; }
+    if (s.pid) { if (s.swTo >= 0) s.swP = Math.min(1, s.swP + dt / SWAP); continue; }
+    botTick(s, dt, P);
+  }
+  G.sendT -= dt;
+  if (G.sendT <= 0) { G.sendT = 0.12; broadcastState(); }
+  const humans = G.students.filter(s => s.pid);
+  const done = humans.length ? humans.every(s => s.caught) : G.students.every(s => s.kind === "honest" || s.caught);
+  if (done && !G.endSoon) G.endSoon = 2.2;   // 마지막으로 부수는 모습을 보여 주고 끝내요
+  if (G.endSoon) { G.endSoon -= dt; if (G.endSoon <= 0) return hostEnd(); }
+  if (Date.now() >= G.endAt) hostEnd();
+}
+function broadcastState() {
+  const P = G.pro;
+  toAll({ t: "st", left: Math.max(0, G.endAt - Date.now()), k: G.strikes,
+    pro: [r2(P.x), r2(P.z), r2(P.yaw), r2(P.pitch), P.frozen > 0 ? 1 : 0, P.mv ? 1 : 0],
+    s: G.students.map(s => [s.g, s.swFrom, s.swTo, Math.round(s.swP * 100), s.cam, s.act, r2(s.yaw), r2(s.pitch), s.caught ? 1 : 0]) }, true);
+}
+
+// AI 수험생: 감독관이 멀리 있거나 딴 데를 보면 몰래 AI 안경을 껴요
+function startSwap(s, to) { s.swFrom = s.g; s.swTo = to; s.swP = 0; }
+function botTick(s, dt, P) {
+  const dx = s.x - P.x, dz = s.z - P.z, d = Math.hypot(dx, dz) || 0.01;
+  const facing = (dx * -Math.sin(P.yaw) + dz * -Math.cos(P.yaw)) / d > Math.cos(0.95);
+  const threat = (d < 4.6 && facing) || d < 2.3;
+  if (s.swTo >= 0) {
+    s.swP += dt / SWAP;
+    if (s.swP >= 0.5) s.g = s.swTo;
+    if (s.swP >= 1) { s.swTo = -1; s.swP = 0; }
+  }
+  if (s.act) { s.actT -= dt; if (s.actT <= 0) s.act = 0; }
+  // 고개: 대부분 시험지를 보고, 가끔 둘러봐요
+  s.lookT -= dt;
+  if (s.lookT <= 0) {
+    s.lookT = rand(1.5, 5);
+    const r = Math.random();
+    if (r < 0.72) { s.ty = rand(-0.15, 0.15); s.tp = rand(-0.75, -0.5); }
+    else if (r < 0.92) { s.ty = rand(-0.5, 0.5); s.tp = rand(-0.1, 0.2); }
+    else { s.ty = rand(-1.4, 1.4); s.tp = 0; }
+  }
+  const using = cheating(s);
+  if (using && s.nervous && threat) { s.ty = clamp(Math.atan2(dx, dz), -1.6, 1.6); s.tp = 0; }   // 들킬까 봐 감독관을 힐끔
+  const k = Math.min(1, dt * 4);
+  s.yaw += (s.ty - s.yaw) * k; s.pitch += (s.tp - s.pitch) * k;
+
+  if (s.kind === "honest") {   // 정직한 학생도 가끔 안경을 고쳐 쓰거나 머리를 긁어요 (헷갈리게!)
+    s.timer -= dt;
+    if (s.timer <= 0 && !s.act) { s.act = 1; s.actT = rand(0.7, 1.2); s.timer = rand(6, 18); }
+    return;
+  }
+  if (s.swTo >= 0 || s.act) return;
+  const danger = threat && !(s.careless && d > 1.6);   // 덜렁이는 감독관이 아주 가까워야 알아채요
+  if (s.kind === "cheatG") {
+    if (s.g === 2) {
+      if (danger) { s.alarm += dt; if (s.alarm >= s.react) { startSwap(s, s.base); s.timer = rand(3, 9); s.alarm = 0; } }
+      else { s.alarm = 0; s.timer -= dt; if (s.timer <= 0) { startSwap(s, s.base); s.timer = rand(3, 9); } }
+    } else {
+      s.timer -= dt;
+      if (s.timer <= 0) { if (!threat && d > 3.8) { startSwap(s, 2); s.timer = rand(4, 10); s.alarm = 0; } else s.timer = rand(0.8, 2.5); }
+    }
+  } else {   // cheatC: 가슴 단추에 숨긴 초소형 카메라
+    const camDanger = danger && d < 3.4;
+    if (s.cam) {
+      if (camDanger) { s.alarm += dt; if (s.alarm >= s.react) { s.cam = 0; s.act = 2; s.actT = 0.6; s.timer = rand(3, 9); s.alarm = 0; } }
+      else { s.alarm = 0; s.timer -= dt; if (s.timer <= 0) { s.cam = 0; s.act = 2; s.actT = 0.6; s.timer = rand(3, 9); } }
+    } else {
+      s.timer -= dt;
+      if (s.timer <= 0) { if (!threat && d > 3) { s.cam = 1; s.act = 2; s.actT = 0.6; s.timer = rand(4, 10); s.alarm = 0; } else s.timer = rand(0.8, 2.5); }
+    }
+  }
+}
+
+// AI 감독관: 통로를 따라 순찰하다가 수상하면 다가가서 봐요
+const WX = [-4.7, -2.2, 0, 2.2, 4.7], WZ = [-5.0, -2.1, 0.08, 2.29, 5.0];
+function newAI() { return { i: 2, j: 0, pi: -1, pj: -1, tx: 0, tz: -5.0, wait: 1.5, lookSid: -1, scan: 1 }; }
+function turnToward(P, vx, vz, maxStep) {
+  const want = Math.atan2(-vx, -vz);
+  let d = want - P.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+  P.yaw += clamp(d, -maxStep, maxStep);
+}
+function suspiciousNear(P) {
+  let best = null, bd = 1e9;
+  for (const s of G.students) {
+    if (s.caught || !(s.act || s.swTo >= 0 || cheating(s))) continue;
+    const vx = s.x - P.x, vz = s.z - P.z, d = Math.hypot(vx, vz);
+    const cos = (vx * -Math.sin(P.yaw) + vz * -Math.cos(P.yaw)) / (d || 1);
+    if (d < 7.5 && cos > 0.35 && d < bd) { best = s; bd = d; }
+  }
+  return best;
+}
+function aiProctorTick(dt) {
+  const A = G.ai, P = G.pro;
+  if (A.wait > 0) {
+    A.wait -= dt;
+    if (A.lookSid >= 0) { const s = G.students[A.lookSid]; turnToward(P, s.x - P.x, s.z - P.z, dt * 2.5); }
+    else P.yaw += dt * 0.7 * A.scan;
+    P.mv = 0;
+  } else {
+    const dx = A.tx - P.x, dz = A.tz - P.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) {
+      const sus = suspiciousNear(P);
+      A.wait = rand(0.8, 2.4); A.scan = Math.random() < 0.5 ? -1 : 1;
+      const near = G.students.filter(s => Math.hypot(s.x - P.x, s.z - P.z) < 3.5);
+      A.lookSid = sus ? sus.sid : (near.length && Math.random() < 0.7 ? pick(near).sid : -1);
+      // 다음 갈 곳: 옆 칸 중 하나 (수상한 애가 있으면 그쪽으로)
+      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([a, b]) => [A.i + a, A.j + b])
+        .filter(([i, j]) => i >= 0 && i < WX.length && j >= 0 && j < WZ.length);
+      let opts = nb.filter(([i, j]) => !(i === A.pi && j === A.pj)); if (!opts.length) opts = nb;
+      let nxt = pick(opts);
+      if (sus && Math.random() < 0.75) nxt = opts.reduce((a, b) => Math.hypot(WX[a[0]] - sus.x, WZ[a[1]] - sus.z) < Math.hypot(WX[b[0]] - sus.x, WZ[b[1]] - sus.z) ? a : b);
+      A.pi = A.i; A.pj = A.j; [A.i, A.j] = nxt; A.tx = WX[A.i]; A.tz = WZ[A.j];
+      P.mv = 0;
+    } else {
+      const sp = Math.min(d, 1.25 * dt);
+      P.x += dx / d * sp; P.z += dz / d * sp; P.mv = 1;
+      turnToward(P, dx, dz, dt * 4);
+    }
+  }
+  // 눈앞에서 부정행위 장비가 보이면 잡아요
+  for (const s of G.students) {
+    if (s.caught) continue;
+    if (!cheating(s)) { s.susp = Math.max(0, s.susp - dt); continue; }
+    const vx = s.x - P.x, vz = s.z - P.z, d = Math.hypot(vx, vz) || 0.01;
+    const cos = (vx * -Math.sin(P.yaw) + vz * -Math.cos(P.yaw)) / d;
+    const camOnly = s.g !== 2 && !(s.swTo >= 0 && (s.swTo === 2 || s.swFrom === 2));
+    if (d < (camOnly ? 2.3 : 3.7) && cos > 0.78) {
+      s.susp += dt;
+      if (s.susp > 0.7) { catchStudent(s, "ai"); A.wait = 2.2; A.lookSid = s.sid; }
+    } else s.susp = Math.max(0, s.susp - dt * 0.5);
+  }
+}
+
+function hostEnd() {
+  if (!G || room.phase !== "play") return;
+  clearInterval(G.loop);
+  broadcastState();
+  room.phase = "end";
+  const res = [];
+  const proP = room.players.find(p => p.pid === G.proctor);
+  for (const s of G.students) {
+    if (!s.pid) continue;
+    const p = room.players.find(x => x.pid === s.pid);
+    res.push({ name: p ? p.name : "?", pid: s.pid, sid: s.sid, out: s.caught ? "caught" : s.solved >= s.total ? "win" : "short", solved: s.solved, total: s.total });
+  }
+  toAll({ t: "end", res, proctor: G.proctor, proName: proP && !proP.gone ? proP.name : "AI 감독관", strikes: G.strikes,
+    cheaters: G.students.filter(s => s.kind !== "honest").map(s => s.sid),
+    caught: G.students.filter(s => s.caught).map(s => s.sid) });
+}
+function hostAgain() {
+  if (!isHost || !room) return;
+  if (G) clearInterval(G.loop);
+  room.phase = "lobby"; G = null;
+  sendLobby();
+}
+
+// ---------- 모두: 받은 메시지 처리 ----------
+let L = null;   // 대기실 정보
+let V = null;   // 시험 화면 정보 (내 역할, 수험생들 모습과 상태)
+function clientHandle(m) {
+  switch (m.t) {
+    case "welcome":
+      if (isHost) return;
+      joined = true; if (net) clearTimeout(net.joinTimer);
+      if (m.lobby) showLobby(m.lobby);
+      break;
+    case "error": menu(String(m.msg || "")); break;
+    case "lobby": if (joined) showLobby(m); break;
+    case "go": if (joined) startView(m); break;
+    case "st": if (V) applyState(m); break;
+    case "fx": if (V) playFx(m); break;
+    case "end": if (V) showEnd(m); break;
+  }
+}
+
+// ---------- 대기실 ----------
+function showLobby(v) {
+  L = v;
+  endGameView();
+  const host = isHost;
+  const n = v.players.length;
+  const humansExam = v.aiPro ? n : n - 1;
+  const bots = Math.max(0, SEATS - humansExam);
+  const mins = [1, 2, 3, 4, 5].map(k => `<button class="${k === v.minutes ? "on" : ""}" ${host ? `onclick="setMinutes(${k})"` : "disabled"}>${k}분</button>`).join("");
+  show(`
+    <div class="card">
+      <div class="roomtop">
+        <div class="qr">${qrImage(roomLink(v.code))}</div>
+        <div>
+          <div class="sub">방 코드</div>
+          <div class="code">${esc(v.code)}</div>
+          <div class="sub">휴대폰 카메라로 QR을 찍거나<br>방 코드를 입력하면 들어와요</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>⏱️ 시험 시간</h2>
+      <div class="seg">${mins}</div>
+      <div class="sub" style="margin-top:6px">문제 ${v.minutes * 3 + 2}개 · 시간 안에 다 풀어야 성공이에요</div>
+      <h2 style="margin-top:14px">👮 감독관</h2>
+      <div class="seg">
+        <button class="${!v.aiPro ? "on" : ""}" ${host ? `onclick="setAiPro(false)"` : "disabled"}>🎲 사람 중 무작위</button>
+        <button class="${v.aiPro ? "on" : ""}" ${host ? `onclick="setAiPro(true)"` : "disabled"}>🤖 AI 감독관</button>
+      </div>
+      <div class="sub" style="margin-top:6px">${v.aiPro ? "사람은 모두 수험생! AI 감독관을 피해 몰래 풀어요." :
+        n === 1 ? "혼자면 내가 감독관이 돼요. 수험생을 해 보려면 🤖 AI 감독관을 고르세요." : "시작하면 한 명이 감독관으로 뽑혀요."}</div>
+    </div>
+    <div class="card">
+      <h2>🧑‍🎓 참가자 ${n} / ${v.aiPro ? SEATS : MAX_PEOPLE}명</h2>
+      <div class="players">${v.players.map(p => `<span>${p.pid === "host" ? "👑 " : ""}${esc(p.name)}${p.pid === (isHost ? "host" : myId) ? " (나)" : ""}</span>`).join("")}</div>
+      <div class="sub" style="margin-top:8px">빈 자리 ${bots}개는 🤖 AI 수험생이 채워요 (부정행위하는 AI도, 정직한 AI도 있어요)</div>
+      ${host ? `<button class="btn red" onclick="hostStart()" ${v.aiPro && n > SEATS ? "disabled" : ""}>▶ 시험 시작</button>` :
+        `<div class="notice center">방장이 시작하기를 기다리는 중...</div>`}
+      <button class="btn gray" onclick="menu()">나가기</button>
+    </div>
+    <div class="card sub">
+      <b>조작</b><br>
+      👮 감독관: WASD 이동 · 마우스로 보기 · 클릭 검사 (휴대폰: 왼쪽 조이스틱 · 화면 끌기 · 검사 버튼)<br>
+      🧑‍🎓 수험생: 화면 끌어서 둘러보기 · <b>G</b> 안경 바꾸기 · <b>C</b> 카메라 · <b>1~5</b> 답 고르기 · <b>R</b> 시험지 보기
+    </div>`);
+}
+
+// =====================================================
+//                      3D 교실
+// =====================================================
+let R = null;          // three.js 물건들
+const GEO = {}, MAT = {};
+const geo = (k, f) => GEO[k] || (GEO[k] = f());
+const box = (w, h, d) => geo(`b${w},${h},${d}`, () => new THREE.BoxGeometry(w, h, d));
+const sph = (r, a = 16, b = 12) => geo(`s${r},${a}`, () => new THREE.SphereGeometry(r, a, b));
+const cyl = (r, h, s = 16) => geo(`c${r},${h},${s}`, () => new THREE.CylinderGeometry(r, r, h, s));
+const cap = (r, l) => geo(`p${r},${l}`, () => new THREE.CapsuleGeometry(r, l, 6, 12));
+const lam = (c, o = {}) => { const k = "l" + c + JSON.stringify(o); return MAT[k] || (MAT[k] = new THREE.MeshLambertMaterial({ color: c, ...o })); };
+const pho = (c, o = {}) => { const k = "p" + c + JSON.stringify(o); return MAT[k] || (MAT[k] = new THREE.MeshPhongMaterial({ color: c, shininess: 90, ...o })); };
+const bas = (c, o = {}) => { const k = "b" + c + JSON.stringify(o); return MAT[k] || (MAT[k] = new THREE.MeshBasicMaterial({ color: c, ...o })); };
+function mesh(g, m, x = 0, y = 0, z = 0, parent) { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); if (parent) parent.add(o); return o; }
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+function textSprite(text, bg, fg = "#fff", sw = 0.62) {
+  const tex = canvasTex(256, 72, (g, w, h) => {
+    g.fillStyle = bg; g.beginPath(); g.roundRect ? g.roundRect(4, 4, w - 8, h - 8, 18) : g.rect(4, 4, w - 8, h - 8); g.fill();
+    g.fillStyle = fg; g.font = "bold 38px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, w / 2, h / 2 + 2);
+  });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  s.scale.set(sw, sw * 72 / 256, 1); s.renderOrder = 10; return s;
+}
+// AI 안경 카메라 테두리는 빛나요 (멀리서도 동그란 카메라가 확실히 보이게)
+let AI_RING, CAM_LED;
+
+function init3D() {
+  if (R) return true;
+  if (typeof THREE === "undefined") return false;
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  $("stage").appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xdde5ec);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.02, 60);
+  camera.rotation.order = "YXZ";
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8d7b66, 0.8));
+  const sun = new THREE.DirectionalLight(0xfff7e8, 0.55); sun.position.set(-6, 9, 3); scene.add(sun);
+  AI_RING = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+  CAM_LED = new THREE.MeshBasicMaterial({ color: 0xff2020 });
+  R = { renderer, scene, camera, students: [], hit: [], fx: [], tags: [], obst: [] };
+  buildRoom(scene);
+  R.pro = makeProctor(); scene.add(R.pro.root);
+  R.ray = new THREE.Raycaster();
+  addEventListener("resize", () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+  bindInput();
+  requestAnimationFrame(frame);
+  return true;
+}
+
+function buildRoom(scene) {
+  const W = ROOM.x1 - ROOM.x0, D = ROOM.z1 - ROOM.z0, cz = (ROOM.z0 + ROOM.z1) / 2, H = 3.2;
+  // 나무 바닥
+  const wood = canvasTex(512, 512, (g, w, h) => {
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle = ["#b98a5a", "#c49564", "#ad7f52", "#bf8f5e"][i % 4]; g.fillRect(0, i * 64, w, 64);
+      g.fillStyle = "#0000001a"; g.fillRect(0, i * 64, w, 2);
+      g.fillRect((i * 173) % w, i * 64, 2, 64);
+    }
+  });
+  wood.wrapS = wood.wrapT = THREE.RepeatWrapping; wood.repeat.set(W / 3, D / 3);
+  const floor = mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: wood }), 0, 0, cz, scene); floor.rotation.x = -Math.PI / 2;
+  const ceil = mesh(new THREE.PlaneGeometry(W, D), lam(0xf8fafc), 0, H, cz, scene); ceil.rotation.x = Math.PI / 2;
+  const wallM = lam(0xf1ece0), lowM = lam(0x9fb5a8);
+  const wall = (w, x, z, ry) => {
+    const a = mesh(new THREE.PlaneGeometry(w, H), wallM, x, H / 2, z, scene); a.rotation.y = ry;
+    const b = mesh(new THREE.PlaneGeometry(w, 0.9), lowM, x, 0.45, z, scene); b.rotation.y = ry;
+    b.position.x += Math.sin(ry) * 0.005; b.position.z += Math.cos(ry) * 0.005;
+  };
+  wall(W, 0, ROOM.z0, 0); wall(W, 0, ROOM.z1, Math.PI); wall(D, ROOM.x0, cz, Math.PI / 2); wall(D, ROOM.x1, cz, -Math.PI / 2);
+  // 칠판
+  const board = canvasTex(1024, 330, (g, w, h) => {
+    g.fillStyle = "#1f4d3a"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#6b4423"; g.lineWidth = 18; g.strokeRect(0, 0, w, h);
+    g.fillStyle = "#f5f5f4"; g.textAlign = "center";
+    g.font = "bold 58px sans-serif"; g.fillText("2027학년도 대학수학능력시험", w / 2, 92);
+    g.font = "bold 44px sans-serif"; g.fillText("제2교시  수학 영역", w / 2, 160);
+    g.fillStyle = "#fde68a"; g.font = "bold 38px sans-serif"; g.fillText("⚠ 전자기기 · AI 안경 · 카메라 반입 금지", w / 2, 236);
+    g.fillStyle = "#e7e5e4"; g.font = "30px sans-serif"; g.fillText("부정행위 적발 시 시험 무효", w / 2, 290);
+  });
+  mesh(new THREE.PlaneGeometry(5.2, 1.68), new THREE.MeshBasicMaterial({ map: board }), 0, 1.75, ROOM.z0 + 0.02, scene);
+  // 시계
+  const clockT = canvasTex(128, 128, (g) => {
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(64, 64, 60, 0, 7); g.fill(); g.lineWidth = 6; g.strokeStyle = "#222"; g.stroke();
+    g.lineWidth = 5; g.beginPath(); g.moveTo(64, 64); g.lineTo(64, 24); g.moveTo(64, 64); g.lineTo(92, 74); g.stroke();
+  });
+  mesh(new THREE.CircleGeometry(0.28, 24), new THREE.MeshBasicMaterial({ map: clockT }), 3.7, 2.4, ROOM.z0 + 0.02, scene);
+  // 창문 (왼쪽 벽)
+  const sky = canvasTex(64, 64, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, "#9bd1f5"); gr.addColorStop(1, "#e0f2fe"); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
+  for (const z of [-4.2, -0.6, 3.0]) {
+    const win = mesh(new THREE.PlaneGeometry(2.2, 1.3), new THREE.MeshBasicMaterial({ map: sky }), ROOM.x0 + 0.02, 1.75, z, scene); win.rotation.y = Math.PI / 2;
+    mesh(box(0.05, 1.4, 0.06), lam(0xffffff), ROOM.x0 + 0.03, 1.75, z, scene);
+    mesh(box(0.05, 0.06, 2.3), lam(0xffffff), ROOM.x0 + 0.03, 1.1, z, scene);
+  }
+  // 문 (오른쪽 벽)
+  const door = mesh(new THREE.PlaneGeometry(1.0, 2.1), lam(0x8b5a2b), ROOM.x1 - 0.02, 1.05, -5.4, scene); door.rotation.y = -Math.PI / 2;
+  // 천장 조명
+  for (const x of [-3, 0, 3]) for (const z of [-4.5, -1, 2.5]) mesh(box(1.2, 0.04, 0.3), bas(0xffffff), x, H - 0.03, z, scene);
+  // 감독관 교탁
+  mesh(box(1.2, 0.95, 0.6), lam(0x7c4a21), 3.9, 0.475, -6.2, scene);
+  R.obst.push({ x0: 3.3, x1: 4.5, z0: -6.5, z1: -5.9 });
+  // 책상과 의자
+  const paperT = canvasTex(128, 170, (g, w, h) => {
+    g.fillStyle = "#fffef6"; g.fillRect(0, 0, w, h); g.fillStyle = "#111"; g.font = "bold 14px sans-serif"; g.fillText("수학 영역", 34, 20);
+    g.fillRect(8, 26, w - 16, 2); g.fillStyle = "#9ca3af";
+    for (let i = 0; i < 9; i++) { g.fillRect(10, 40 + i * 14, 40 + (i * 37) % 60, 3); g.fillRect(68, 40 + i * 14, 20 + (i * 23) % 36, 3); }
+  });
+  const paperM = new THREE.MeshLambertMaterial({ map: paperT });
+  const deskM = lam(0xcaa070), metal = lam(0x6b7280), chairM = lam(0x3f6c8f);
+  for (let sid = 0; sid < SEATS; sid++) {
+    const { x, z } = seatPos(sid), dz = z - 0.5;
+    mesh(box(0.72, 0.035, 0.5), deskM, x, 0.72, dz, scene);
+    mesh(box(0.66, 0.1, 0.44), metal, x, 0.65, dz, scene);
+    for (const [a, b] of [[-0.32, -0.21], [0.32, -0.21], [-0.32, 0.21], [0.32, 0.21]]) mesh(cyl(0.015, 0.62, 6), metal, x + a, 0.31, dz + b, scene);
+    const p = mesh(new THREE.PlaneGeometry(0.26, 0.34), paperM, x - 0.04, 0.739, dz + 0.02, scene); p.rotation.x = -Math.PI / 2; p.rotation.z = 0.08;
+    const pen = mesh(cyl(0.005, 0.16, 6), lam(0xfacc15), x + 0.2, 0.745, dz + 0.05, scene); pen.rotation.z = Math.PI / 2; pen.rotation.y = 0.5;
+    const numT = canvasTex(96, 48, (g, w, h) => { g.fillStyle = "#334155"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.font = "bold 34px sans-serif"; g.textAlign = "center"; g.fillText(String(sid + 1).padStart(2, "0"), w / 2, 36); });
+    const tag = mesh(new THREE.PlaneGeometry(0.12, 0.06), new THREE.MeshBasicMaterial({ map: numT }), x + 0.25, 0.739, dz + 0.18, scene); tag.rotation.x = -Math.PI / 2;
+    mesh(box(0.42, 0.04, 0.4), chairM, x, 0.45, z + 0.05, scene);
+    mesh(box(0.42, 0.36, 0.03), chairM, x, 0.74, z + 0.27, scene);
+    for (const [a, b] of [[-0.18, -0.15], [0.18, -0.15], [-0.18, 0.25], [0.18, 0.25]]) mesh(cyl(0.012, 0.45, 6), metal, x + a, 0.225, z + b, scene);
+    R.obst.push({ x0: x - 0.42, x1: x + 0.42, z0: z - 0.78, z1: z + 0.36 });
+  }
+}
+
+// ---------- 안경 만들기 ----------
+function makeGlasses(ai) {
+  const g = new THREE.Group();
+  const frame = ai ? pho(0x0b0b0b) : lam(0x6b4f3a);
+  const lens = geo("lens", () => new THREE.CircleGeometry(0.03, 20));
+  const lensM = MAT.lens || (MAT.lens = new THREE.MeshPhongMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, shininess: 120 }));
+  const ring = geo("ring" + ai, () => new THREE.TorusGeometry(ai ? 0.033 : 0.03, ai ? 0.0068 : 0.0035, 8, 24));
+  for (const sx of [-1, 1]) {
+    mesh(ring, frame, sx * 0.046, 0, 0, g);
+    mesh(lens, lensM, sx * 0.046, 0, 0, g);
+    mesh(box(ai ? 0.012 : 0.005, ai ? 0.014 : 0.005, 0.12), frame, sx * (ai ? 0.083 : 0.077), 0.006, 0.06, g);
+  }
+  mesh(box(0.03, ai ? 0.01 : 0.005, ai ? 0.01 : 0.005), frame, 0, 0.012, 0, g);
+  if (ai) {
+    // 오른쪽 경첩에 달린 동그란 초소형 카메라 (잘 보이게 크고 빛나게!)
+    const c = new THREE.Group(); c.position.set(0.09, 0.016, -0.01); c.scale.setScalar(1.35); g.add(c);
+    const body = mesh(cyl(0.019, 0.026, 20), pho(0x1f2937), 0, 0, 0, c); body.rotation.x = Math.PI / 2;
+    const ln = mesh(cyl(0.012, 0.008, 20), pho(0x0a1f3d, { shininess: 200, specular: 0xffffff }), 0, 0, -0.014, c); ln.rotation.x = Math.PI / 2;
+    const rg = mesh(geo("aring", () => new THREE.TorusGeometry(0.0145, 0.003, 8, 24)), AI_RING, 0, 0, -0.0145, c);
+    mesh(sph(0.0035, 8, 6), bas(0xffffff), -0.004, 0.004, -0.019, c);
+    mesh(sph(0.004, 8, 6), CAM_LED, 0.0, 0.021, -0.006, c);
+    // 왼쪽에는 배터리 상자
+    mesh(box(0.014, 0.018, 0.04), frame, -0.085, 0.006, 0.03, g);
+  }
+  return g;
+}
+function makeChestCam() {
+  const c = new THREE.Group();
+  const b = mesh(cyl(0.014, 0.012, 16), pho(0x111111), 0, 0, 0, c); b.rotation.x = Math.PI / 2;
+  const l = mesh(cyl(0.008, 0.006, 16), pho(0x0a1f3d, { shininess: 200, specular: 0xffffff }), 0, 0, -0.008, c); l.rotation.x = Math.PI / 2;
+  const led = mesh(sph(0.005, 8, 6), CAM_LED, 0.016, 0.01, -0.004, c);
+  c.userData.led = led; c.scale.setScalar(1.4);
+  return c;
+}
+
+// ---------- 수험생 (앉아 있는 사람) ----------
+function makeArm(side, shirt, skin) {
+  const sh = new THREE.Group(); sh.position.set(0.2 * side, 1.0, 0);
+  mesh(cap(0.048, 0.18), shirt, 0, -0.13, 0, sh);
+  const el = new THREE.Group(); el.position.y = -0.26; sh.add(el);
+  mesh(cap(0.042, 0.17), shirt, 0, -0.12, 0, el);
+  const hand = new THREE.Group(); hand.position.y = -0.26; el.add(hand);
+  mesh(sph(0.045, 10, 8), skin, 0, 0, 0, hand);
+  return { sh, el, hand };
+}
+function addHair(head, style, hm) {
+  const top = mesh(geo("hair", () => new THREE.SphereGeometry(0.124, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.52)), hm, 0, 0.13, 0.012, head);
+  top.rotation.x = 0.38;
+  if (style === "long") mesh(box(0.23, 0.27, 0.1), hm, 0, 0.03, 0.07, head);
+  if (style === "bob") { mesh(box(0.25, 0.14, 0.17), hm, 0, 0.07, 0.04, head); }
+  if (style === "pony") { mesh(sph(0.05), hm, 0, 0.12, 0.14, head); mesh(cap(0.03, 0.1), hm, 0, 0.03, 0.15, head); }
+  if (style === "buzz") top.scale.setScalar(0.97);
+}
+function makeStudent(look) {
+  const [si, hi, ci, st] = look;
+  const skin = lam(LOOK.skin[si] ?? LOOK.skin[0]), hm = lam(LOOK.hair[hi] ?? LOOK.hair[0]), shirt = lam(LOOK.shirt[ci] ?? LOOK.shirt[0]);
+  const pants = lam(0x1f2937), shoe = lam(0x111111);
+  const root = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    mesh(box(0.13, 0.13, 0.44), pants, sx * 0.095, 0.5, -0.16, root);
+    mesh(box(0.11, 0.46, 0.12), pants, sx * 0.095, 0.25, -0.36, root);
+    mesh(box(0.12, 0.07, 0.2), shoe, sx * 0.095, 0.035, -0.4, root);
+  }
+  const torso = mesh(cap(0.165, 0.3), shirt, 0, 0.78, 0.02, root); torso.scale.set(1.15, 1, 0.75);
+  const head = new THREE.Group(); head.position.set(0, 1.04, 0); root.add(head);
+  mesh(cyl(0.045, 0.08, 10), skin, 0, 0.02, 0, head);
+  const hd = mesh(sph(0.115, 20, 16), skin, 0, 0.13, 0, head); hd.scale.set(0.92, 1, 1);
+  for (const sx of [-1, 1]) mesh(sph(0.012, 8, 6), lam(0x111111), sx * 0.04, 0.125, -0.1, head);
+  mesh(box(0.035, 0.008, 0.01), lam(0x9f1239), 0, 0.075, -0.105, head);
+  addHair(head, LOOK.style[st] || "short", hm);
+  const gN = makeGlasses(false), gA = makeGlasses(true);
+  for (const gg of [gN, gA]) { gg.position.set(0, 0.125, -0.115); head.add(gg); }
+  const aL = makeArm(-1, shirt, skin), aR = makeArm(1, shirt, skin);
+  root.add(aL.sh, aR.sh);
+  const hN = makeGlasses(false), hA = makeGlasses(true);
+  for (const gg of [hN, hA]) { gg.position.set(-0.03, -0.02, -0.03); gg.rotation.set(0.3, 0.6, 1.4); aR.hand.add(gg); }
+  const camC = makeChestCam(); camC.position.set(0.07, 0.92, -0.128); root.add(camC);
+  const hit = mesh(box(0.55, 1.0, 0.6), MAT.hit || (MAT.hit = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false })), 0, 0.8, -0.1, root);
+  return { root, head, gN, gA, hN, hA, aL, aR, camC, hit, arm: 0, pose: 0, p: 0 };
+}
+// 팔 자세: 0 책상 위(글씨 쓰기) · 얼굴(안경 만지기) · 가슴(카메라 만지기)
+const POSE = { rest: [0.35, 0.05, 1.1], face: [1.15, -0.42, 2.25], chest: [0.75, -0.55, 1.75] };
+
+// ---------- 감독관 (서 있는 사람) ----------
+function makeProctor() {
+  const root = new THREE.Group();
+  const suit = lam(0x1e293b), skin = lam(LOOK.skin[1]), shoe = lam(0x111111);
+  const legs = [-1, 1].map(sx => {
+    const g = new THREE.Group(); g.position.set(sx * 0.1, 0.9, 0); root.add(g);
+    mesh(cap(0.07, 0.7), lam(0x334155), 0, -0.45, 0, g);
+    mesh(box(0.12, 0.07, 0.24), shoe, 0, -0.86, -0.04, g);
+    return g;
+  });
+  const torso = mesh(cap(0.19, 0.42), suit, 0, 1.25, 0, root); torso.scale.set(1.1, 1, 0.7);
+  mesh(box(0.1, 0.2, 0.02), lam(0xffffff), 0, 1.45, -0.13, root);
+  const arms = [-1, 1].map(sx => {
+    const g = new THREE.Group(); g.position.set(sx * 0.26, 1.48, 0); root.add(g);
+    mesh(cap(0.058, 0.48), suit, 0, -0.3, 0, g);
+    mesh(sph(0.055, 10, 8), skin, 0, -0.6, 0, g);
+    return g;
+  });
+  mesh(cyl(0.066, 0.08, 12), lam(0xfacc15), -0.26, 1.3, 0, root);   // 노란 감독관 완장
+  const head = new THREE.Group(); head.position.y = 1.58; root.add(head);
+  mesh(sph(0.125, 20, 16), skin, 0, 0.13, 0, head);
+  const hr = mesh(geo("phair", () => new THREE.SphereGeometry(0.132, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5)), lam(0x52525b), 0, 0.14, 0.01, head); hr.rotation.x = 0.35;
+  for (const sx of [-1, 1]) mesh(sph(0.013, 8, 6), lam(0x111111), sx * 0.045, 0.13, -0.112, head);
+  const badge = textSprite("감독관", "#b91c1c", "#fff", 0.5); badge.position.y = 2.05; root.add(badge);
+  return { root, legs, arms, head, walk: 0, x: 0, z: -5.2, yaw: Math.PI };
+}
+
+// ---------- 시험 화면 시작 / 끝 ----------
+function startView(m) {
+  if (!init3D()) { toast("3D 프로그램을 불러오지 못했어요. 새로고침해 주세요.", 4000); return; }
+  endGameView();
+  const mine = isHost ? "host" : myId;
+  const meS = m.students.find(s => s.pid === mine);
+  V = { role: m.proctor === mine ? "pro" : meS ? "exam" : "watch", mySid: meS ? meS.sid : -1, total: m.total, proctor: m.proctor,
+    endAt: Date.now() + m.endIn, strikes: 0, students: m.students, cs: m.students.map(() => ({ g: 1, sf: 1, sw: -1, p: 0, cam: 0, act: 0, yaw: 0, pitch: -0.6, caught: 0 })),
+    pro: { x: 0, z: -5.2, yaw: Math.PI, pitch: 0, frozen: 0, mv: 0 }, over: false, stepT: 0 };
+  // 수험생들 만들기
+  for (const s of m.students) {
+    const o = makeStudent(Array.isArray(s.look) ? s.look : [0, 0, 0, 0]);
+    const { x, z } = seatPos(s.sid);
+    o.root.position.set(x, 0, z); o.sid = s.sid;
+    o.hit.userData.sid = s.sid;
+    R.scene.add(o.root); R.students[s.sid] = o; R.hit.push(o.hit);
+    o.tag = textSprite("❌ 부정행위", "#dc2626", "#fff", 0.62); o.tag.position.set(0, 1.62, 0); o.tag.visible = false; o.root.add(o.tag);
+  }
+  R.pro.root.visible = V.role !== "pro";
+  if (V.role === "exam") { R.students[V.mySid].head.visible = false; startExam(); }
+  if (V.role === "pro") startProctor();
+  $("hud").style.display = "block";
+  hideUI();
+  SND.bell();
+  toast(V.role === "pro" ? "👮 당신은 <b>감독관</b>이에요!<br>AI 안경(동그란 카메라)과 초소형 카메라를 찾아 부수세요"
+    : "🧑‍🎓 당신은 <b>수험생</b>이에요!<br>G로 AI 안경을 몰래 끼우고 감독관에게 들키지 마세요", 4200);
+  renderHudTop();
+}
+function endGameView() {
+  if (document.pointerLockElement) document.exitPointerLock();
+  $("hud").style.display = "none";
+  ["paper", "joy", "inspectBtn", "cross", "aim", "lockhint", "caughtbox", "frozen", "swapfx", "aibox", "awayhint"].forEach(id => $(id).style.display = "none");
+  $("lens").className = "";
+  if (R) {
+    R.students.forEach(o => o && R.scene.remove(o.root));
+    R.fx.forEach(f => R.scene.remove(f.obj));
+    R.students = []; R.hit = []; R.fx = [];
+    R.renderer.domElement.style.filter = "";
+  }
+  V = null; EX = null; PR = null;
+}
+
+// ---------- 상태 받기 ----------
+function applyState(m) {
+  V.endAt = Date.now() + num(m.left);
+  V.strikes = num(m.k);
+  const p = Array.isArray(m.pro) ? m.pro : [];
+  Object.assign(V.pro, { x: num(p[0]), z: num(p[1], -5), yaw: num(p[2]), pitch: num(p[3]), frozen: p[4] ? 1 : 0, mv: p[5] ? 1 : 0 });
+  (m.s || []).forEach((a, i) => {
+    const c = V.cs[i]; if (!c || !Array.isArray(a)) return;
+    const newSwap = a[2] >= 0 && c.sw < 0;
+    c.g = a[0]; c.sf = a[1]; c.sw = a[2]; c.cam = a[4]; c.act = a[5]; c.yaw = num(a[6]); c.pitch = num(a[7]);
+    if (c.sw < 0) c.p = 0; else if (newSwap) c.p = num(a[3]) / 100; else c.p = Math.max(c.p, num(a[3]) / 100);
+    if (a[8] && !c.caught && i === V.mySid) iGotCaught();
+    c.caught = a[8];
+  });
+}
+function playFx(m) {
+  const o = R.students[m.sid];
+  if (m.k === "smash" && o) {
+    smashFx(m.sid, m.dev);
+    if (V.role === "pro") {
+      $("hammer").classList.remove("swing"); void $("hammer").offsetWidth; $("hammer").classList.add("swing");
+      if (m.by === "pro") toast(m.dev === "cam" ? "💥 초소형 카메라 적발! 부숴 버렸어요" : "💥 AI 안경 적발! 박살 냈어요");
+    } else if (m.sid !== V.mySid) toast(`🚨 ${String(m.sid + 1).padStart(2, "0")}번 수험생 부정행위 적발!`);
+  }
+  if (m.k === "wrong" && o) {
+    SND.wrong();
+    const q = textSprite("😠 억울해요!", "#f59e0b", "#111", 0.6); q.position.set(0, 1.62, 0); o.root.add(q);
+    R.fx.push({ obj: q, parent: o.root, life: 1.8, sprite: true });
+    if (V.role === "pro") toast("🙅 정직한 수험생이었어요! 4초 동안 사과해야 해요");
+  }
+  if (m.k === "proleft") toast("👮 감독관이 나가서 🤖 AI 감독관이 이어받았어요!", 3000);
+}
+function smashFx(sid, dev) {
+  SND.smash();
+  const { x, z } = seatPos(sid);
+  const o = R.students[sid];
+  const at = dev === "cam" ? new THREE.Vector3(x + 0.07, 0.92, z - 0.15) : new THREE.Vector3(x, 1.18, z - 0.14);
+  if (o && dev !== "cam") { o.head.updateWorldMatrix(true, false); o.head.localToWorld(at.set(0, 0.13, -0.12)); }
+  const g = geo("shard", () => new THREE.TetrahedronGeometry(0.018));
+  const cols = [0x22d3ee, 0xbfe6ff, 0x111111, 0xffffff, 0x0e7490];
+  for (let i = 0; i < 34; i++) {
+    const s = mesh(g, bas(pick(cols), { transparent: true }), at.x, at.y, at.z, R.scene);
+    s.userData.v = new THREE.Vector3(rand(-1.4, 1.4), rand(0.6, 2.2), rand(-1.6, 0.6));
+    s.userData.r = new THREE.Vector3(rand(-9, 9), rand(-9, 9), rand(-9, 9));
+    R.fx.push({ obj: s, life: rand(1, 1.6), shard: true });
+  }
+  const boom = textSprite("💥 쾅!", "#fde047", "#b91c1c", 0.6); boom.position.copy(at).add(new THREE.Vector3(0, 0.25, 0)); R.scene.add(boom);
+  R.fx.push({ obj: boom, life: 0.9, sprite: true, grow: true });
+}
+
+// =====================================================
+//               수험생 (내가 문제를 푸는 사람)
+// =====================================================
+let EX = null;
+function makeQuestion() {
+  let q, a;
+  switch (rnd(6)) {
+    case 0: { const x = irand(12, 49), y = irand(3, 9); q = `${x} × ${y} 의 값은?`; a = x * y; break; }
+    case 1: { const x = irand(23, 89), y = irand(14, 69), z = irand(11, 39); q = `${x} + ${y} − ${z} 의 값은?`; a = x + y - z; break; }
+    case 2: { const x = irand(11, 25); q = `${x}² 의 값은?`; a = x * x; break; }
+    case 3: { const k = irand(2, 9), x = irand(2, 12), b = irand(1, 30); q = `${k}x + ${b} = ${k * x + b} 일 때, x 의 값은?`; a = x; break; }
+    case 4: { const p = pick([10, 20, 25, 30, 40, 75]), n = pick([40, 60, 80, 120, 160, 200, 240]); q = `${n} 의 ${p}% 는?`; a = n * p / 100; break; }
+    default: { const x = irand(3, 9), y = irand(4, 9), z = irand(2, 9); q = `${x} × ${y} + ${z} × ${x} 의 값은?`; a = x * (y + z); break; }
+  }
+  const set = new Set([a]);
+  while (set.size < 5) { const d = pick([1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) * (Math.random() < 0.5 ? -1 : 1); if (a + d >= 0) set.add(a + d); }
+  const ch = shuffle([...set]);
+  return { q, ch, ans: ch.indexOf(a) };
+}
+function startExam() {
+  EX = { g: 1, sf: 1, swTo: -1, swP: 0, cam: 0, actT: 0, yaw: 0, pitch: -0.75, qs: Array.from({ length: V.total }, makeQuestion), qi: 0, solved: 0,
+    lock: 0, ana: 0, camAna: 0, caught: false, sendT: 0, drag: null, lastHint: "" };
+  $("paper").style.display = "block";
+  $("help").style.display = "none";   // 수험생 조작 설명은 시험지 아래에 보여요
+  renderPaper(); exSend(true);
+}
+function renderPaper() {
+  if (!EX) return;
+  const done = EX.solved >= V.total, q = EX.qs[EX.qi];
+  const swapping = EX.swTo >= 0;
+  $("paper").innerHTML = `
+    <div class="ph"><span>2027학년도 대학수학능력시험 · 수학 영역</span><span>✏️ ${EX.solved} / ${V.total}</span></div>
+    ${EX.caught ? `<div class="q" style="color:#b91c1c">🚫 부정행위로 시험이 무효가 되었어요</div>` : done ? `<div class="q" style="color:#15803d">✅ 다 풀었어요! 시험이 끝날 때까지 들키지 마세요</div>` : `
+    <div class="q">${EX.qi + 1}. ${esc(q.q)}</div>
+    <div class="ch">${q.ch.map((v, i) => `<button id="ch${i}" onclick="answer(${i})">${CIRCLED[i]} ${v}</button>`).join("")}</div>`}
+    <div class="tools">
+      <button id="tgl" class="${EX.g === 2 ? "ai" : ""}" onclick="swapGlasses()" ${EX.caught || swapping ? "disabled" : ""}>👓 ${EX.g === 2 ? "AI 안경 쓰는 중" : "일반 안경"} (G)</button>
+      <button id="tcam" class="${EX.cam ? "camon" : ""}" onclick="toggleCam()" ${EX.caught ? "disabled" : ""}>📷 카메라 ${EX.cam ? "켜짐" : "꺼짐"} (C)</button>
+      <button onclick="lookPaper()">📄 시험지 (R)</button>
+    </div>
+    <div class="msg" id="pmsg"></div>`;
+  EX.lastHint = "";
+}
+function paperVisible() { return Math.abs(EX.yaw) < 0.55 && EX.pitch < -0.38; }
+function answer(i) {
+  if (!EX || EX.caught || EX.swTo >= 0 || EX.lock > 0 || EX.solved >= V.total) return;
+  const q = EX.qs[EX.qi];
+  if (!paperVisible()) return toast("시험지를 보고 있어야 답을 쓸 수 있어요 (R)");
+  if (i === q.ans) { SND.ok(); EX.solved++; EX.qi++; EX.ana = 0; EX.camAna = 0; renderPaper(); exSend(true); }
+  else { SND.bad(); EX.lock = 2.5; const b = $("ch" + i); if (b) b.style.borderColor = "#dc2626"; }
+}
+function swapGlasses() {
+  if (!EX || EX.caught || EX.swTo >= 0) return;
+  EX.sf = EX.g; EX.swTo = EX.g === 2 ? 1 : 2; EX.swP = 0;
+  renderPaper(); exSend(true);
+}
+function toggleCam() {
+  if (!EX || EX.caught) return;
+  EX.cam = EX.cam ? 0 : 1; EX.actT = 0.6; EX.camAna = 0;
+  renderPaper(); exSend(true);
+}
+function lookPaper() { if (EX) { EX.yaw = 0; EX.pitch = -0.75; } }
+function exSend(sure) {
+  if (!EX || !V) return;
+  send({ t: "ex", g: EX.g, sf: EX.sf, swTo: EX.swTo, cam: EX.cam, act: EX.actT > 0 ? 2 : 0, yaw: r2(EX.yaw), pitch: r2(EX.pitch), solved: EX.solved }, !sure);
+}
+function iGotCaught() {
+  if (!EX) return;
+  EX.caught = true; EX.g = 0; EX.swTo = -1; EX.cam = 0;
+  SND.alarm();
+  $("flash").style.transition = "none"; $("flash").style.opacity = 0.8; requestAnimationFrame(() => { $("flash").style.transition = "opacity .6s"; $("flash").style.opacity = 0; });
+  $("caughtbox").innerHTML = "🚨 부정행위 적발!<br><small>감독관에게 장비를 빼앗겼어요.<br>시험이 끝날 때까지 구경해요.</small>";
+  $("caughtbox").style.display = "block";
+  setTimeout(() => { if ($("caughtbox")) $("caughtbox").style.display = "none"; }, 4000);
+  renderPaper();
+}
+function exTick(dt) {
+  const keys = KEYS, sp = 1.8 * dt;
+  if (keys.ArrowLeft || keys.KeyA || keys.KeyQ) EX.yaw += sp;
+  if (keys.ArrowRight || keys.KeyD || keys.KeyE) EX.yaw -= sp;
+  if (keys.ArrowUp || keys.KeyW) EX.pitch += sp;
+  if (keys.ArrowDown || keys.KeyS) EX.pitch -= sp;
+  EX.yaw = clamp(EX.yaw, -2.4, 2.4); EX.pitch = clamp(EX.pitch, -1.1, 0.5);
+  if (EX.swTo >= 0) {
+    EX.swP += dt / SWAP;
+    if (EX.swP >= 0.5 && EX.g !== EX.swTo) { EX.g = EX.swTo; exSend(true); }
+    if (EX.swP >= 1) { EX.swTo = -1; EX.swP = 0; renderPaper(); exSend(true); }
+  }
+  if (EX.actT > 0) { EX.actT -= dt; if (EX.actT <= 0) exSend(true); }
+  if (EX.lock > 0) EX.lock -= dt;
+  EX.sendT -= dt; if (EX.sendT <= 0) { EX.sendT = 0.2; exSend(false); }
+  // 화면 효과
+  const vis = paperVisible(), swapping = EX.swTo >= 0;
+  $("paper").classList.toggle("away", !vis);
+  $("awayhint").style.display = vis || EX.caught ? "none" : "block";
+  $("lens").className = EX.g === 2 ? "ai" : EX.g === 1 ? "normal" : "";
+  $("swapfx").style.display = swapping ? "flex" : "none";
+  R.renderer.domElement.style.filter = swapping ? `blur(${(6 * Math.sin(Math.PI * EX.swP)).toFixed(1)}px)` : "";
+  // AI 안경 · 카메라가 정답을 알려줘요
+  const active = vis && !swapping && !EX.caught && EX.solved < V.total;
+  let hint = "", hintIdx = -1, cls = "";
+  if (active && EX.g === 2) {
+    EX.ana += dt;
+    hint = EX.ana < 0.8 ? "◉ AI 분석 중..." : `◉ AI 정답: ${CIRCLED[EX.qs[EX.qi].ans]}`;
+    if (EX.ana >= 0.8) hintIdx = EX.qs[EX.qi].ans; cls = "hint";
+  } else if (EX.g !== 2) EX.ana = 0;
+  if (!hint && active && EX.cam) {
+    EX.camAna += dt;
+    hint = EX.camAna < 2.5 ? "📷 사진 보내는 중... 🎧" : `🎧 이어폰: "정답은 ${CIRCLED[EX.qs[EX.qi].ans]}번"`;
+    if (EX.camAna >= 2.5) hintIdx = EX.qs[EX.qi].ans; cls = "hintc";
+  }
+  const box = $("aibox");
+  box.style.display = hint ? "block" : "none"; box.textContent = hint; box.className = cls === "hintc" ? "cam" : "";
+  const key = hint + hintIdx;
+  if (key !== EX.lastHint) {
+    EX.lastHint = key;
+    for (let i = 0; i < 5; i++) { const b = $("ch" + i); if (b) b.className = i === hintIdx ? cls : ""; }
+  }
+  const pm = $("pmsg");
+  if (pm) pm.textContent = EX.lock > 0 ? `❌ 틀렸어요! ${EX.lock.toFixed(1)}초 뒤에 다시` : swapping ? "👓 안경 바꾸는 중..." :
+    IS_TOUCH ? "화면을 끌어서 둘러보기 · 감독관을 조심하세요!" : "마우스로 끌거나 방향키로 둘러보기 · 1~5 답 고르기";
+  // 내 카메라: 의자에 앉은 채로 고개만 돌려요
+  const { x, z } = seatPos(V.mySid);
+  const cam = R.camera;
+  cam.rotation.set(EX.pitch, EX.yaw, 0);
+  cam.position.set(x - Math.sin(EX.yaw) * 0.06, 1.18, z - Math.cos(EX.yaw) * 0.06);
+  // 감독관 발소리
+  if (V.pro.mv) {
+    V.stepT -= dt;
+    if (V.stepT <= 0) { V.stepT = 0.5; const d = Math.hypot(V.pro.x - x, V.pro.z - z); SND.step(clamp(1 - d / 8, 0, 1)); }
+  }
+}
+
+// =====================================================
+//               감독관 (내가 걸어 다니는 사람)
+// =====================================================
+let PR = null;
+function startProctor() {
+  PR = { x: 0, z: -5.2, yaw: Math.PI, pitch: -0.15, sendT: 0, cool: 0, aim: -1, aimD: 99, joy: { x: 0, y: 0 } };
+  $("cross").style.display = "block";
+  $("help").style.display = "block";
+  $("help").innerHTML = IS_TOUCH ? "조이스틱: 이동 · 화면 끌기: 보기 · 🔍 검사" : "WASD 이동 · Shift 빨리 · 마우스로 보기 · 클릭 검사";
+  if (IS_TOUCH) { $("joy").style.display = "block"; $("inspectBtn").style.display = "block"; }
+}
+function blocked(x, z) {
+  const r = 0.25;
+  if (x < ROOM.x0 + r || x > ROOM.x1 - r || z < ROOM.z0 + r || z > ROOM.z1 - r) return true;
+  return R.obst.some(o => x > o.x0 - r && x < o.x1 + r && z > o.z0 - r && z < o.z1 + r);
+}
+function prTick(dt) {
+  const frozen = isHost && G ? G.pro.frozen > 0 : !!V.pro.frozen;
+  $("frozen").style.display = frozen ? "flex" : "none";
+  let ix = PR.joy.x, iz = -PR.joy.y;
+  if (KEYS.KeyW || KEYS.ArrowUp) iz += 1;
+  if (KEYS.KeyS || KEYS.ArrowDown) iz -= 1;
+  if (KEYS.KeyD || KEYS.ArrowRight) ix += 1;
+  if (KEYS.KeyA || KEYS.ArrowLeft) ix -= 1;
+  const len = Math.hypot(ix, iz);
+  let moving = 0;
+  if (len > 0.05 && !frozen) {
+    const sp = (KEYS.ShiftLeft || KEYS.ShiftRight ? 3.4 : 2.2) * dt * Math.min(1, len) / len;
+    const fx = -Math.sin(PR.yaw), fz = -Math.cos(PR.yaw), rx = Math.cos(PR.yaw), rz = -Math.sin(PR.yaw);
+    const dx = (fx * iz + rx * ix) * sp, dz = (fz * iz + rz * ix) * sp;
+    if (!blocked(PR.x + dx, PR.z)) PR.x += dx;
+    if (!blocked(PR.x, PR.z + dz)) PR.z += dz;
+    moving = 1;
+  }
+  PR.pitch = clamp(PR.pitch, -1.3, 1.1);
+  const cam = R.camera;
+  const bob = moving ? Math.sin(performance.now() / 140) * 0.025 : 0;
+  cam.position.set(PR.x, 1.65 + bob, PR.z); cam.rotation.set(PR.pitch, PR.yaw, 0);
+  // 조준한 수험생
+  R.ray.setFromCamera({ x: 0, y: 0 }, cam);
+  const h = R.ray.intersectObjects(R.hit, false)[0];
+  PR.aim = -1;
+  if (h) { const sid = h.object.userData.sid; const c = V.cs[sid]; if (c && !c.caught) { PR.aim = sid; PR.aimD = Math.hypot(seatPos(sid).x - PR.x, seatPos(sid).z - PR.z); } }
+  const near = PR.aim >= 0 && PR.aimD <= RANGE;
+  $("cross").className = near ? "hot" : "";
+  const aim = $("aim");
+  aim.style.display = PR.aim >= 0 ? "block" : "none";
+  if (PR.aim >= 0) aim.innerHTML = `수험번호 ${String(PR.aim + 1).padStart(2, "0")} · ${near ? (IS_TOUCH ? "🔍 검사 버튼!" : "🔍 클릭해서 검사") : "더 가까이 가야 검사할 수 있어요"}`;
+  if (PR.cool > 0) PR.cool -= dt;
+  // 방장에게 내 위치 보내기
+  if (isHost && G) { Object.assign(G.pro, { x: PR.x, z: PR.z, yaw: PR.yaw, pitch: PR.pitch, mv: moving }); }
+  else { PR.sendT -= dt; if (PR.sendT <= 0) { PR.sendT = 0.1; send({ t: "pr", x: r2(PR.x), z: r2(PR.z), yaw: r2(PR.yaw), pitch: r2(PR.pitch), mv: moving }, true); } }
+  $("lockhint").style.display = !IS_TOUCH && !document.pointerLockElement && !V.over ? "flex" : "none";
+}
+function inspect() {
+  if (!PR || !V || V.over || PR.cool > 0) return;
+  if (V.pro.frozen || (isHost && G && G.pro.frozen > 0)) return;
+  if (PR.aim < 0) return toast("수험생을 가운데 십자선에 맞추고 검사하세요");
+  if (PR.aimD > RANGE) return toast("🚶 더 가까이 가서 검사하세요");
+  PR.cool = 0.7;
+  send({ t: "inspect", sid: PR.aim });
+}
+
+// ---------- 입력 ----------
+const KEYS = {};
+function bindInput() {
+  const cv = R.renderer.domElement;
+  addEventListener("keydown", e => {
+    if (e.target && e.target.tagName === "INPUT") return;
+    KEYS[e.code] = true;
+    if (!V || V.over) return;
+    if (V.role === "exam" && EX) {
+      if (e.code === "KeyG") swapGlasses();
+      if (e.code === "KeyC") toggleCam();
+      if (e.code === "KeyR" || e.code === "Space") lookPaper();
+      const n = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5"].indexOf(e.code); if (n >= 0) answer(n);
+      if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
+    }
+  });
+  addEventListener("keyup", e => { KEYS[e.code] = false; });
+  addEventListener("blur", () => { for (const k in KEYS) KEYS[k] = false; });
+  // 감독관: 마우스 잠그고 보기
+  $("lockhint").addEventListener("click", () => { audio(); cv.requestPointerLock && cv.requestPointerLock(); });
+  cv.addEventListener("mousedown", e => {
+    if (!V || V.over) return;
+    if (V.role === "pro" && !IS_TOUCH) { if (document.pointerLockElement === cv) inspect(); else cv.requestPointerLock && cv.requestPointerLock(); }
+  });
+  addEventListener("mousemove", e => {
+    if (V && V.role === "pro" && PR && document.pointerLockElement === cv) { PR.yaw -= e.movementX * 0.0022; PR.pitch -= e.movementY * 0.0022; }
+  });
+  // 끌어서 둘러보기 (수험생 · 관전 · 휴대폰 감독관)
+  let drag = null, lastTap = 0;
+  cv.addEventListener("pointerdown", e => {
+    audio();
+    if (!V) return;
+    if (V.role === "pro" && e.pointerType === "mouse") return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    if (V.role === "exam" && e.pointerType !== "mouse") { const now = Date.now(); if (now - lastTap < 300) lookPaper(); lastTap = now; }
+  });
+  addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id || !V) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    const k = e.pointerType === "mouse" ? 0.005 : 0.006;
+    if (V.role === "pro" && PR) { PR.yaw -= dx * k; PR.pitch -= dy * k; }
+    else if (EX) { EX.yaw -= dx * k; EX.pitch -= dy * k; }
+    else { W.yaw -= dx * k; W.pitch -= dy * k; }
+  });
+  const up = e => { if (drag && e.pointerId === drag.id) drag = null; };
+  addEventListener("pointerup", up); addEventListener("pointercancel", up);
+  // 휴대폰 조이스틱
+  const joy = $("joy"), knob = joy.querySelector("i");
+  let jid = null;
+  const setJoy = e => {
+    const r = joy.getBoundingClientRect();
+    let x = (e.clientX - r.left - r.width / 2) / (r.width / 2), y = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+    const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+    if (PR) PR.joy = { x, y };
+    knob.style.transform = `translate(${x * 40}px, ${y * 40}px)`;
+  };
+  joy.addEventListener("pointerdown", e => { jid = e.pointerId; joy.setPointerCapture(e.pointerId); setJoy(e); e.stopPropagation(); });
+  joy.addEventListener("pointermove", e => { if (e.pointerId === jid) setJoy(e); });
+  const jEnd = e => { if (e.pointerId === jid) { jid = null; if (PR) PR.joy = { x: 0, y: 0 }; knob.style.transform = ""; } };
+  joy.addEventListener("pointerup", jEnd); joy.addEventListener("pointercancel", jEnd);
+  $("inspectBtn").addEventListener("pointerdown", e => { e.stopPropagation(); inspect(); });
+}
+const W = { yaw: Math.PI, pitch: -0.3 };   // 관전 카메라
+
+// ---------- 매 화면 그리기 ----------
+let lastT = performance.now(), hudT = 0;
+function frame(t) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+  if (!V) return;
+  if (V.role === "exam" && EX) exTick(dt);
+  else if (V.role === "pro" && PR) prTick(dt);
+  else { R.camera.position.set(0, 2.6, 5.8); R.camera.rotation.set(W.pitch, W.yaw - Math.PI, 0); }
+  const now = t / 1000;
+  // 수험생들 움직이기
+  for (const o of R.students) {
+    if (!o) continue;
+    const c = V.cs[o.sid];
+    if (c.sw >= 0) c.p = Math.min(1, c.p + dt / SWAP);
+    let face = c.g, held = -1, armT = 0, pose = "face";
+    if (c.sw >= 0) {
+      const p = c.p;
+      armT = p < 0.3 ? p / 0.3 : p > 0.7 ? (1 - p) / 0.3 : 1;
+      if (p > 0.3 && p < 0.7) { face = 0; held = p < 0.5 ? c.sf : c.sw; } else face = p <= 0.3 ? c.sf : c.sw;
+      o.arm = armT;
+    } else {
+      if (c.act === 1) { armT = 1; pose = "face"; } else if (c.act === 2) { armT = 1; pose = "chest"; }
+      o.arm += (armT - o.arm) * Math.min(1, dt * 7);
+    }
+    if (c.act === 2 && c.sw < 0) o.pose = 1; else if (c.sw >= 0 || c.act === 1) o.pose = 0;
+    o.gN.visible = face === 1; o.gA.visible = face === 2;
+    o.hN.visible = held === 1; o.hA.visible = held === 2;
+    o.camC.visible = !!c.cam;
+    if (c.cam) o.camC.userData.led.visible = (now * 2.5) % 1 < 0.6;
+    const target = o.pose === 1 ? POSE.chest : POSE.face, rest = POSE.rest, a = o.arm;
+    const write = a < 0.05 && !c.caught ? Math.sin(now * 9 + o.sid) * 0.06 : 0;
+    o.aR.sh.rotation.x = rest[0] + (target[0] - rest[0]) * a;
+    o.aR.sh.rotation.z = rest[1] + (target[1] - rest[1]) * a;
+    o.aR.el.rotation.x = rest[2] + (target[2] - rest[2]) * a + write;
+    o.aL.sh.rotation.set(rest[0], -rest[1], 0); o.aL.el.rotation.x = rest[2];
+    const yaw = c.caught ? 0 : c.yaw, pitch = c.caught ? -0.65 : c.pitch;
+    o.head.rotation.y += (clamp(yaw, -1.6, 1.6) - o.head.rotation.y) * Math.min(1, dt * 8);
+    o.head.rotation.x += (clamp(pitch, -0.38, 0.4) - o.head.rotation.x) * Math.min(1, dt * 8);
+    o.tag.visible = !!c.caught;
+  }
+  AI_RING.color.setHSL(0.52, 1, 0.5 + Math.sin(now * 5) * 0.12);
+  // 감독관 모습
+  const P = R.pro, tp = V.pro;
+  if (P.root.visible) {
+    const k = Math.min(1, dt * 10);
+    P.x += (tp.x - P.x) * k; P.z += (tp.z - P.z) * k;
+    let d = tp.yaw - P.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); P.yaw += d * k;
+    P.root.position.set(P.x, 0, P.z); P.root.rotation.y = P.yaw;
+    P.head.rotation.x = clamp(tp.pitch, -0.6, 0.4);
+    if (tp.mv) P.walk += dt * 8; else P.walk *= 0.85;
+    const sw = Math.sin(P.walk) * (tp.mv ? 0.5 : 0);
+    P.legs[0].rotation.x = sw; P.legs[1].rotation.x = -sw; P.arms[0].rotation.x = -sw * 0.6; P.arms[1].rotation.x = sw * 0.6;
+  }
+  // 효과
+  R.fx = R.fx.filter(f => {
+    f.life -= dt;
+    if (f.shard) {
+      const v = f.obj.userData.v; v.y -= 6 * dt;
+      f.obj.position.addScaledVector(v, dt);
+      if (f.obj.position.y < 0.01) { f.obj.position.y = 0.01; v.set(v.x * 0.4, -v.y * 0.3, v.z * 0.4); }
+      f.obj.rotation.x += f.obj.userData.r.x * dt; f.obj.rotation.y += f.obj.userData.r.y * dt;
+      f.obj.material.opacity = clamp(f.life, 0, 1);
+    }
+    if (f.grow) f.obj.scale.multiplyScalar(1 + dt * 1.5);
+    if (f.life <= 0) { (f.parent || R.scene).remove(f.obj); return false; }
+    return true;
+  });
+  hudT -= dt; if (hudT <= 0) { hudT = 0.25; renderHudTop(); }
+  R.renderer.render(R.scene, R.camera);
+}
+function renderHudTop() {
+  if (!V) return;
+  const left = V.over ? 0 : V.endAt - Date.now();
+  const caughtN = V.cs.filter(c => c.caught).length;
+  const role = V.role === "pro" ? "👮 감독관" : V.role === "exam" ? "🧑‍🎓 수험생" : "👀 관전";
+  let extra = "";
+  if (V.role === "pro") extra = `<span class="pill">💥 적발 ${caughtN}</span><span class="pill">🙅 오인 ${V.strikes}</span>`;
+  else if (V.role === "exam" && EX) extra = `<span class="pill">✏️ ${EX.solved}/${V.total}</span>${EX.g === 2 ? `<span class="pill" style="color:#67e8f9">👓 AI 안경</span>` : ""}${EX.cam ? `<span class="pill" style="color:#fca5a5">📷 카메라 ON</span>` : ""}`;
+  else extra = `<span class="pill">💥 적발 ${caughtN}</span>`;
+  $("hudtop").innerHTML = (V.over && V.endHtml ? `<span class="pill" style="pointer-events:auto;cursor:pointer;background:#4338ca" onclick="show(V.endHtml, true)">📋 결과 보기</span>` : "") + `<span class="pill">${role}</span><span class="pill time ${left < 15000 ? "warn" : ""}">⏱ ${fmtTime(left)}</span>${extra}`;
+}
+
+// ---------- 결과 ----------
+function showEnd(m) {
+  if (!V || V.over) return;
+  V.over = true; V.cheaters = m.cheaters || [];
+  if (document.pointerLockElement) document.exitPointerLock();
+  SND.bell();
+  // 몰래 부정행위했는데 안 들킨 수험생을 보여 줘요
+  for (const sid of V.cheaters) {
+    const o = R.students[sid]; if (!o || V.cs[sid].caught) continue;
+    const t = textSprite("🤫 안 들킴", "#f59e0b", "#111", 0.55); t.position.set(0, 1.62, 0); o.root.add(t); R.fx.push({ obj: t, parent: o.root, life: 9999, sprite: true });
+  }
+  ["paper", "joy", "inspectBtn", "cross", "aim", "lockhint", "frozen", "swapfx", "aibox", "awayhint", "caughtbox"].forEach(id => $(id).style.display = "none");
+  R.renderer.domElement.style.filter = "";
+  const mine = isHost ? "host" : myId;
+  const res = Array.isArray(m.res) ? m.res : [];
+  const exams = res.filter(r => r.pid !== m.proctor);
+  const cheaters = (m.cheaters || []).length, caught = (m.caught || []).length;
+  const proWin = exams.length ? exams.every(r => r.out === "caught") : caught >= cheaters;
+  const OUT = { win: "🎉 성공", caught: "🚨 적발", short: "⏰ 시간 부족" };
+  let title;
+  if (V.role === "pro") title = proWin ? "🏆 완벽한 감독!" : "😵 놓친 부정행위자가 있어요";
+  else {
+    const r = exams.find(x => x.pid === mine);
+    title = !r ? "시험 끝!" : r.out === "win" ? "🎉 성공! 안 들키고 다 풀었어요" : r.out === "caught" ? "🚨 부정행위 적발!" : "⏰ 시간 안에 다 못 풀었어요";
+  }
+  V.endHtml = `
+      <div class="card">
+        <div class="big">${title}</div>
+        <div class="sub center">감독관: ${esc(m.proName)} · 부정행위 ${cheaters}명 중 <b>${caught}명 적발</b> · 오인 검사 ${num(m.strikes)}번</div>
+      </div>
+      <div class="card">
+        <h2>🧑‍🎓 사람 수험생 결과</h2>
+        ${exams.length ? `<table class="res">${exams.map(r => `<tr><td>${String(r.sid + 1).padStart(2, "0")}번</td><td><b>${esc(r.name)}</b>${r.pid === mine ? " (나)" : ""}</td>
+          <td>✏️ ${r.solved}/${r.total}</td><td>${OUT[r.out] || ""}</td></tr>`).join("")}</table>` : `<div class="sub">사람 수험생이 없었어요 (AI 수험생만 있었어요)</div>`}
+      </div>
+      <div class="card">
+        ${isHost ? `<button class="btn red" style="margin-top:0" onclick="hostAgain()">🔁 다시 하기 (대기실로)</button>` : `<div class="notice center" style="margin-top:0">방장이 다시 하기를 누르면 대기실로 가요</div>`}
+        <button class="btn gray" onclick="hideUI()">🔍 교실 둘러보기</button>
+        <button class="btn gray" onclick="menu()">나가기</button>
+      </div>`;
+  setTimeout(() => { if (V && V.over) show(V.endHtml, true); }, 1800);
+  renderHudTop();
+}
+
+// ---------- 시작 ----------
+menu();
+connectBrokers();
+</script>
+</body>
+</html>
