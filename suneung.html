@@ -38,6 +38,8 @@ const COLS = [-4.65, -3.1, -1.55, 0, 1.55, 3.1, 4.65], ROWS = [-3.2, -1.3, 0.6, 
 const seatPos = sid => ({ x: COLS[sid % COLS.length], z: ROWS[Math.floor(sid / COLS.length)] });
 // 교실 벽
 const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
+const DESK_Y = 0.82;   // 책상 높이 (위로 올렸어요)
+const EYE_PRO = 1.5;   // 감독관 눈높이 (키를 줄였어요)
 // ===============================
 </script>
 <style>
@@ -104,9 +106,6 @@ const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
     font-size: .85rem; white-space: nowrap; }
   #lockhint { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer; }
   #lockhint div { background: #0f172ae6; padding: 18px 26px; border-radius: 14px; font-size: 1.15rem; font-weight: bold; text-align: center; line-height: 1.6; }
-  #hammer { position: absolute; right: 18%; bottom: 14%; font-size: 120px; opacity: 0; transform-origin: 80% 80%; }
-  #hammer.swing { animation: swing .45s ease-out; }
-  @keyframes swing { 0% { opacity: 1; transform: rotate(-60deg); } 50% { opacity: 1; transform: rotate(25deg); } 100% { opacity: 0; transform: rotate(10deg); } }
   #flash { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity .4s; }
   #frozen { position: absolute; inset: 0; background: #7f1d1d55; display: none; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: bold; }
   /* 안경 · AI 화면 */
@@ -159,7 +158,6 @@ const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
   <div id="aim"></div>
   <div id="aibox"></div>
   <div id="swapfx">👓 안경 바꾸는 중...</div>
-  <div id="hammer">🔨</div>
   <div id="flash"></div>
   <div id="frozen">😓 무고한 수험생이었어요! 사과하는 중...</div>
   <div id="help"></div>
@@ -792,6 +790,9 @@ function init3D() {
   R = { renderer, scene, camera, students: [], hit: [], fx: [], tags: [], obst: [] };
   buildRoom(scene);
   R.pro = makeProctor(); scene.add(R.pro.root);
+  // 감독관 1인칭 화면에 보이는 망치 (카메라에 붙여요)
+  scene.add(camera);
+  R.fpHammer = new THREE.Group(); const fh = makeHammer(); fh.position.y = -0.1; R.fpHammer.add(fh); R.fpHammer.visible = false; camera.add(R.fpHammer);
   R.ray = new THREE.Raycaster();
   addEventListener("resize", () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
   bindInput();
@@ -860,13 +861,13 @@ function buildRoom(scene) {
   const deskM = lam(0xcaa070), metal = lam(0x6b7280), chairM = lam(0x3f6c8f);
   for (let sid = 0; sid < SEATS; sid++) {
     const { x, z } = seatPos(sid), dz = z - 0.5;
-    mesh(box(0.72, 0.035, 0.5), deskM, x, 0.72, dz, scene);
-    mesh(box(0.66, 0.1, 0.44), metal, x, 0.65, dz, scene);
-    for (const [a, b] of [[-0.32, -0.21], [0.32, -0.21], [-0.32, 0.21], [0.32, 0.21]]) mesh(cyl(0.015, 0.62, 6), metal, x + a, 0.31, dz + b, scene);
-    const p = mesh(new THREE.PlaneGeometry(0.26, 0.34), paperM, x - 0.04, 0.739, dz + 0.02, scene); p.rotation.x = -Math.PI / 2; p.rotation.z = 0.08;
-    const pen = mesh(cyl(0.005, 0.16, 6), lam(0xfacc15), x + 0.2, 0.745, dz + 0.05, scene); pen.rotation.z = Math.PI / 2; pen.rotation.y = 0.5;
+    mesh(box(0.72, 0.035, 0.5), deskM, x, DESK_Y, dz, scene);
+    mesh(box(0.66, 0.1, 0.44), metal, x, DESK_Y - 0.07, dz, scene);
+    for (const [a, b] of [[-0.32, -0.21], [0.32, -0.21], [-0.32, 0.21], [0.32, 0.21]]) mesh(cyl(0.015, DESK_Y - 0.1, 6), metal, x + a, (DESK_Y - 0.1) / 2, dz + b, scene);
+    const p = mesh(new THREE.PlaneGeometry(0.26, 0.34), paperM, x - 0.04, DESK_Y + 0.019, dz + 0.02, scene); p.rotation.x = -Math.PI / 2; p.rotation.z = 0.08;
+    const pen = mesh(cyl(0.005, 0.16, 6), lam(0xfacc15), x + 0.2, DESK_Y + 0.025, dz + 0.05, scene); pen.rotation.z = Math.PI / 2; pen.rotation.y = 0.5;
     const numT = canvasTex(96, 48, (g, w, h) => { g.fillStyle = "#334155"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.font = "bold 34px sans-serif"; g.textAlign = "center"; g.fillText(String(sid + 1).padStart(2, "0"), w / 2, 36); });
-    const tag = mesh(new THREE.PlaneGeometry(0.12, 0.06), new THREE.MeshBasicMaterial({ map: numT }), x + 0.25, 0.739, dz + 0.18, scene); tag.rotation.x = -Math.PI / 2;
+    const tag = mesh(new THREE.PlaneGeometry(0.12, 0.06), new THREE.MeshBasicMaterial({ map: numT }), x + 0.25, DESK_Y + 0.019, dz + 0.18, scene); tag.rotation.x = -Math.PI / 2;
     mesh(box(0.42, 0.04, 0.4), chairM, x, 0.45, z + 0.05, scene);
     mesh(box(0.42, 0.36, 0.03), chairM, x, 0.74, z + 0.27, scene);
     for (const [a, b] of [[-0.18, -0.15], [0.18, -0.15], [-0.18, 0.25], [0.18, 0.25]]) mesh(cyl(0.012, 0.45, 6), metal, x + a, 0.225, z + b, scene);
@@ -886,32 +887,32 @@ function roundRect(w, h, r, dy = 0) {
 }
 function makeGlasses(ai) {
   const g = new THREE.Group();
-  const frame = pho(0x3a2213, { shininess: 70 });            // 진한 갈색 뿔테
-  const brow = pho(0x1f120a, { shininess: 70 });             // 위쪽 눈썹 부분은 더 진하게
-  const rim = geo("hornRim", () => {
-    const sh = roundRect(0.062, 0.048, 0.014);
-    sh.holes.push(roundRect(0.046, 0.032, 0.009, -0.002));   // 위쪽 테가 더 두꺼워요
-    const gg = new THREE.ExtrudeGeometry(sh, { depth: 0.007, bevelEnabled: false, curveSegments: 6 });
-    gg.translate(0, 0, -0.0035); return gg;
+  const frame = pho(0x111111, { shininess: 80 });            // 검정 뿔테 (두껍게)
+  const rim = geo("hornRim2", () => {
+    const sh = roundRect(0.068, 0.054, 0.016);
+    sh.holes.push(roundRect(0.042, 0.029, 0.008, -0.003));   // 테가 두껍고, 위쪽이 더 두꺼워요
+    const gg = new THREE.ExtrudeGeometry(sh, { depth: 0.011, bevelEnabled: false, curveSegments: 6 });
+    gg.translate(0, 0, -0.0055); return gg;
   });
-  const lens = geo("hornLens", () => new THREE.ShapeGeometry(roundRect(0.047, 0.033, 0.009, -0.002), 6));
+  const lens = geo("hornLens2", () => new THREE.ShapeGeometry(roundRect(0.043, 0.03, 0.008, -0.003), 6));
   const lensM = MAT.lens || (MAT.lens = new THREE.MeshPhongMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, shininess: 120 }));
   for (const sx of [-1, 1]) {
-    mesh(rim, frame, sx * 0.047, 0, 0, g);
-    mesh(lens, lensM, sx * 0.047, 0, 0, g);
-    mesh(box(0.058, 0.009, 0.009), brow, sx * 0.047, 0.02, -0.001, g);      // 두꺼운 윗테
-    mesh(box(0.008, 0.012, 0.012), frame, sx * 0.078, 0.012, 0.002, g);      // 경첩
-    mesh(box(0.007, 0.01, 0.12), frame, sx * 0.081, 0.012, 0.062, g);        // 다리
+    mesh(rim, frame, sx * 0.049, 0, 0, g);
+    mesh(lens, lensM, sx * 0.049, 0, 0, g);
+    mesh(box(0.012, 0.016, 0.016), frame, sx * 0.086, 0.012, 0.002, g);      // 경첩
+    if (ai) mesh(box(0.014, 0.02, 0.17), frame, sx * 0.093, 0.012, 0.085, g);   // AI 안경은 다리가 더 길고 두꺼워요
+    else mesh(box(0.009, 0.012, 0.12), frame, sx * 0.089, 0.012, 0.062, g);
   }
-  mesh(box(0.018, 0.008, 0.007), frame, 0, 0.012, 0, g);                     // 코 다리
+  mesh(box(0.02, 0.011, 0.01), frame, 0, 0.013, 0, g);                       // 코 다리
   if (ai) {
-    // 오른쪽 경첩에 달린 작고 동그란 초소형 카메라 (뿔테와 같은 색이라 가까이서 잘 봐야 보여요)
-    const c = new THREE.Group(); c.position.set(0.079, 0.012, -0.007); g.add(c);
-    const body = mesh(cyl(0.0105, 0.012, 20), frame, 0, 0, 0, c); body.rotation.x = Math.PI / 2;
-    const ln = mesh(cyl(0.0055, 0.004, 16), pho(0x050505, { shininess: 200, specular: 0xffffff }), 0, 0, -0.0065, c); ln.rotation.x = Math.PI / 2;
-    mesh(sph(0.0016, 6, 4), bas(0xffffff), -0.002, 0.002, -0.0088, c);   // 렌즈 반짝임
-    // 왼쪽에는 배터리 상자
-    mesh(box(0.014, 0.018, 0.04), frame, -0.085, 0.006, 0.03, g);
+    // 오른쪽 모서리에 둥글게 살짝 튀어나온 초소형 카메라
+    const c = new THREE.Group(); c.position.set(0.086, 0.012, -0.008); g.add(c);
+    const camM = pho(0x3d3d3d, { shininess: 80 });              // 카메라는 뿔테보다 약간 연한 검정(진회색)
+    const body = mesh(cyl(0.0115, 0.014, 20), camM, 0, 0, 0, c); body.rotation.x = Math.PI / 2;
+    const dome = mesh(geo("camDome", () => new THREE.SphereGeometry(0.0115, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2)), camM, 0, 0, -0.007, c);
+    dome.rotation.x = -Math.PI / 2; dome.scale.set(1, 0.7, 1);                 // 앞으로 둥글게 튀어나와요
+    mesh(sph(0.0055, 12, 8), pho(0x000000, { shininess: 250, specular: 0xffffff }), 0, 0, -0.0135, c);   // 렌즈
+    mesh(sph(0.0016, 6, 4), bas(0xffffff), -0.002, 0.002, -0.0185, c);      // 렌즈 반짝임
   }
   return g;
 }
@@ -970,7 +971,7 @@ function makeStudent(look) {
   return { root, head, gN, gA, hN, hA, aL, aR, camC, hit, arm: 0, pose: 0, p: 0 };
 }
 // 팔 자세: 0 책상 위(글씨 쓰기) · 얼굴(안경 만지기) · 가슴(카메라 만지기)
-const POSE = { rest: [0.35, 0.05, 1.1], face: [1.15, -0.42, 2.25], chest: [0.75, -0.55, 1.75] };
+const POSE = { rest: [0.6, 0.05, 1.15], face: [1.15, -0.42, 2.25], chest: [0.85, -0.55, 1.75] };
 
 // ---------- 감독관 (서 있는 사람) ----------
 function makeProctor() {
@@ -996,7 +997,24 @@ function makeProctor() {
   const hr = mesh(geo("phair", () => new THREE.SphereGeometry(0.132, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5)), lam(0x52525b), 0, 0.14, 0.01, head); hr.rotation.x = 0.35;
   for (const sx of [-1, 1]) mesh(sph(0.013, 8, 6), lam(0x111111), sx * 0.045, 0.13, -0.112, head);
   const badge = textSprite("감독관", "#b91c1c", "#fff", 0.5); badge.position.y = 2.05; root.add(badge);
-  return { root, legs, arms, head, walk: 0, x: 0, z: -5.2, yaw: Math.PI };
+  const hm = makeHammer(); hm.position.set(0, -0.6, 0); hm.rotation.x = -2.0; arms[1].add(hm);   // 오른손에 망치 (앞쪽 아래로)
+  root.scale.setScalar(0.88);   // 키를 조금 줄였어요
+  return { root, legs, arms, head, walk: 0, x: 0, z: -5.2, yaw: Math.PI, swing: -1 };
+}
+// 망치: 손잡이는 +y 방향, 머리는 끝에
+function makeHammer() {
+  const h = new THREE.Group();
+  mesh(cyl(0.017, 0.36, 10), lam(0x8b5a2b), 0, 0.14, 0, h);
+  mesh(cyl(0.02, 0.06, 10), lam(0x111111), 0, -0.02, 0, h);   // 손잡이 고무
+  const head = mesh(cyl(0.042, 0.17, 14), pho(0x9ca3af, { shininess: 120 }), 0, 0.33, 0, h); head.rotation.z = Math.PI / 2;
+  mesh(cyl(0.046, 0.02, 14), pho(0x6b7280), 0.085, 0.33, 0, h).rotation.z = Math.PI / 2;
+  return h;
+}
+// 망치 휘두르기: 0 → 1 동안 들어 올렸다가 내려찍어요
+function swingAngle(t) {
+  if (t < 0.35) return 0.2 + (2.7 - 0.2) * (t / 0.35);           // 높이 들기
+  if (t < 0.55) return 2.7 + (0.7 - 2.7) * ((t - 0.35) / 0.2);   // 쾅!
+  return 0.7 + (0.2 - 0.7) * ((t - 0.55) / 0.45);                // 제자리로
 }
 
 // ---------- 시험 화면 시작 / 끝 ----------
@@ -1037,6 +1055,7 @@ function endGameView() {
     R.fx.forEach(f => R.scene.remove(f.obj));
     R.students = []; R.hit = []; R.fx = [];
     R.renderer.domElement.style.filter = "";
+    R.fpHammer.visible = false;
   }
   V = null; EX = null; PR = null;
 }
@@ -1058,10 +1077,10 @@ function applyState(m) {
 }
 function playFx(m) {
   const o = R.students[m.sid];
+  if ((m.k === "smash" && m.by) || m.k === "wrong") R.pro.swing = 0;   // 감독관이 망치를 휘둘러요
   if (m.k === "smash" && o) {
     smashFx(m.sid, m.dev);
     if (V.role === "pro") {
-      $("hammer").classList.remove("swing"); void $("hammer").offsetWidth; $("hammer").classList.add("swing");
       if (m.by === "pro") toast(m.dev === "cam" ? "💥 초소형 카메라 적발! 부숴 버렸어요" : "💥 AI 안경 적발! 박살 냈어요");
     } else if (m.sid !== V.mySid) toast(`🚨 ${String(m.sid + 1).padStart(2, "0")}번 수험생 부정행위 적발!`);
   }
@@ -1275,7 +1294,7 @@ function exTick(dt) {
 // =====================================================
 let PR = null;
 function startProctor() {
-  PR = { x: 0, z: -5.2, yaw: Math.PI, pitch: -0.15, sendT: 0, cool: 0, aim: -1, aimD: 99, joy: { x: 0, y: 0 } };
+  PR = { swing: -1, x: 0, z: -5.2, yaw: Math.PI, pitch: -0.15, sendT: 0, cool: 0, aim: -1, aimD: 99, joy: { x: 0, y: 0 } };
   $("cross").style.display = "block";
   $("help").style.display = "block";
   $("help").innerHTML = IS_TOUCH ? "조이스틱: 이동 · 화면 끌기: 보기 · 🔨 부수기" : "WASD 이동 · Shift 빨리 · 마우스로 보기 · 클릭으로 안경 부수기";
@@ -1307,7 +1326,16 @@ function prTick(dt) {
   PR.pitch = clamp(PR.pitch, -1.3, 1.1);
   const cam = R.camera;
   const bob = moving ? Math.sin(performance.now() / 140) * 0.025 : 0;
-  cam.position.set(PR.x, 1.65 + bob, PR.z); cam.rotation.set(PR.pitch, PR.yaw, 0);
+  cam.position.set(PR.x, EYE_PRO + bob, PR.z); cam.rotation.set(PR.pitch, PR.yaw, 0);
+  // 내 손의 망치
+  const fp = R.fpHammer; fp.visible = !V.over;
+  if (PR.swing >= 0) { PR.swing += dt / 0.5; if (PR.swing >= 1) PR.swing = -1; }
+  const t = PR.swing;   // 뒤로 들었다가 앞으로 내려찍어요
+  // [시간, 높이, 각도]: 위로 번쩍 들었다가 → 앞으로 쾅 → 제자리
+  const K = [[0, -0.32, -0.5], [0.35, -0.08, -0.05], [0.55, -0.36, -1.75], [1, -0.32, -0.5]];
+  let fy = -0.32, rx = -0.5;
+  if (t >= 0) for (let i = 1; i < K.length; i++) if (t <= K[i][0]) { const a = K[i - 1], b = K[i], u = (t - a[0]) / (b[0] - a[0]); fy = a[1] + (b[1] - a[1]) * u; rx = a[2] + (b[2] - a[2]) * u; break; }
+  fp.position.set(0.3, fy + bob * 0.5, -0.45); fp.rotation.set(rx, 0.35, 0.15);
   // 조준한 수험생
   R.ray.setFromCamera({ x: 0, y: 0 }, cam);
   const h = R.ray.intersectObjects(R.hit, false)[0];
@@ -1329,8 +1357,7 @@ function inspect() {
   if (V.pro.frozen || (isHost && G && G.pro.frozen > 0)) return;
   if (PR.aim < 0) return toast("수험생을 가운데 십자선에 맞추고 부수세요");
   if (PR.aimD > RANGE) return toast("🚶 더 가까이 가야 망치가 닿아요");
-  PR.cool = 0.7;
-  $("hammer").classList.remove("swing"); void $("hammer").offsetWidth; $("hammer").classList.add("swing");
+  PR.cool = 0.7; PR.swing = 0;
   noise(0.12, 0.15, 3000);
   send({ t: "inspect", sid: PR.aim });
 }
@@ -1450,7 +1477,9 @@ function frame(t) {
     P.head.rotation.x = clamp(tp.pitch, -0.6, 0.4);
     if (tp.mv) P.walk += dt * 8; else P.walk *= 0.85;
     const sw = Math.sin(P.walk) * (tp.mv ? 0.5 : 0);
-    P.legs[0].rotation.x = sw; P.legs[1].rotation.x = -sw; P.arms[0].rotation.x = -sw * 0.6; P.arms[1].rotation.x = sw * 0.6;
+    P.legs[0].rotation.x = sw; P.legs[1].rotation.x = -sw; P.arms[0].rotation.x = -sw * 0.6;
+    if (P.swing >= 0) { P.swing += dt / 0.6; if (P.swing >= 1) P.swing = -1; }
+    P.arms[1].rotation.x = P.swing >= 0 ? swingAngle(P.swing) : 0.35 + sw * 0.3;   // 망치 든 팔
   }
   // 효과
   R.fx = R.fx.filter(f => {
