@@ -33,6 +33,7 @@ const LOOK = {
 const STYLE_NAMES = { short: "짧은 머리", spiky: "삐죽 머리", long: "긴 머리", cap: "모자", band: "머리띠" };
 const WEAPON_NAMES = { sword: "칼", axe: "도끼", hammer: "망치", staff: "지팡이" };   // 지팡이는 마법 구슬을 날려요
 const TEAMS = ["🔴 빨강팀", "🔵 파랑팀"];
+const AI_LEVELS = ["😊 쉬움", "🙂 보통", "🔥 어려움"];   // AI 난이도: 어려울수록 내 버릇을 잘 읽어요
 const ROOM_PREFIX = "vibe03-battle/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
 // 친구들과 연결해 주는 무료 공개 서버 (모두 미리 연결해 두고 먼저 되는 쪽을 써요)
 // 앞의 두 곳은 일반 https 포트(443)를 써서 학교 인터넷에서도 잘 막히지 않아요
@@ -300,6 +301,10 @@ function menu(err = "") {
       <h2>🏠 방 만들기</h2>
       <button class="btn" onclick="saveName(); createForm()">방 만들기</button>
     </div>
+    <div class="card">
+      <h2>🤖 AI와 대결</h2>
+      <button class="btn" style="background:#0f766e" onclick="saveName(); aiForm()">AI와 대결하기</button>
+    </div>
     <div class="err">${esc(err)}</div>`);
   showNet();
 }
@@ -329,6 +334,77 @@ function createForm() {
       <button class="btn gray" onclick="menu()">뒤로</button>
       <div class="err" id="err"></div>
     </div>`);
+}
+
+// ---------- AI와 대결 (인터넷 없이 이 기기 안에서만 해요) ----------
+let aiOpts = { size: 1, level: 1 };
+function aiForm() {
+  show(`
+    <div class="card">
+      <h2>🤖 AI와 대결</h2>
+      <label class="field">몇 대 몇?</label>
+      <div class="row modes">${[1, 2, 3].map(n => `<button class="${aiOpts.size === n ? "on" : ""}" onclick="aiOpts.size=${n};aiForm()">${n} 대 ${n}</button>`).join("")}</div>
+      <div class="sub" style="margin-top:6px">${aiOpts.size > 1 ? "우리 팀도 AI가 함께 싸워요" : "AI 한 명과 1 대 1로 싸워요"}</div>
+      <label class="field">난이도</label>
+      <div class="row modes">${AI_LEVELS.map((n, i) => `<button class="${aiOpts.level === i ? "on" : ""}" onclick="aiOpts.level=${i};aiForm()">${n}</button>`).join("")}</div>
+      <button class="btn" style="background:#0f766e" onclick="startAI()">▶ 시작</button>
+      <button class="btn gray" onclick="menu()">뒤로</button>
+    </div>`);
+}
+function startAI() {
+  isHost = true; myPid = "host";
+  room = { code: "AI", ai: aiOpts.level, s: { size: aiOpts.size }, phase: "custom", round: 0, roundNo: 0, events: [], players: [] };
+  room.players.push(newPlayer("host", me.name, 0, null));
+  let n = 1;
+  for (let t = 0; t < 2; t++)
+    for (let i = 0; i < aiOpts.size - (t === 0 ? 1 : 0); i++) { room.players.push(newBot("ai" + n, "🤖 AI " + n, t)); n++; }
+  sync();
+}
+const randomStat = () => Object.keys(STAT_UP)[rnd(4)];
+function newBot(pid, name, team) {
+  const b = newPlayer(pid, name, team, null);
+  b.bot = true; b.ready = true;
+  const add = { hp: 0, atk: 0, def: 0, heal: 0 };
+  for (let i = 0; i < START_POINTS; i++) add[randomStat()]++;
+  b.st = Object.fromEntries(Object.keys(BASE).map(k => [k, BASE[k] + add[k] * STAT_UP[k]]));
+  return b;
+}
+// 라운드가 시작될 때 AI가 스탯을 찍고 행동을 골라요 (사람이 뭘 골랐는지는 보지 않아요)
+function botTurn() {
+  if (room.ai == null || room.phase !== "battle") return;
+  room.players.filter(p => p.bot && active(p)).forEach(p => {
+    while (p.pts > 0) { const k = randomStat(); p.pts--; p.st[k] += STAT_UP[k]; if (k === "hp") p.hp += STAT_UP.hp; }
+    if (p.pick) return;
+    const foes = room.players.filter(q => q.team !== p.team && active(q));
+    if (!foes.length) return;
+    const foe = room.ai === 0 ? foes[rnd(foes.length)] : foes.reduce((a, b) => (a.hp <= b.hp ? a : b));   // 체력이 적은 상대를 노려요
+    p.pick = botAct(p, foe, room.ai);
+    p.target = p.pick === "atk" || p.pick === "heavy" ? foe.pid : null;
+  });
+  // 사람이 모두 쓰러져서 AI만 남았으면 알아서 다음 라운드로 넘어가요
+  if (room.players.filter(active).every(q => q.pick)) {
+    const r = room;
+    setTimeout(() => { if (room === r && r.phase === "battle" && r.players.filter(active).every(q => q.pick)) resolve(); }, 2300);
+  }
+}
+function botAct(p, foe, level) {
+  const hurt = p.hp < p.st.hp;
+  const w = { atk: 1, heavy: 1, def: 1, heal: hurt ? 1 : 0.05 };
+  if (level >= 1) {
+    if (p.hp < p.st.hp * 0.4) { w.heal += 0.8; w.def += 0.3; }
+    // 상대가 최근에 자주 한 행동을 보고, 그걸 이기는 행동에 무게를 줘요
+    const h = foe.hist.slice(-6);
+    const freq = a => (h.filter(x => x === a).length + 0.5) / (h.length + 2);
+    const k = level === 2 ? 4 : 1.5;
+    w.def += freq("atk") * k;                       // 공격 ◀ 방어
+    w.atk += freq("heavy") * k;                     // 강공격 ◀ 공격
+    w.heavy += freq("def") * k;                     // 방어 ◀ 강공격
+    if (hurt) w.heal += freq("def") * k * 0.5;      // 방어하는 동안 회복
+    w.atk += freq("heal") * k * 0.6; w.heavy += freq("heal") * k * 0.6;   // 회복 ◀ 공격
+  }
+  let x = Math.random() * Object.values(w).reduce((a, b) => a + b, 0);
+  for (const [a, v] of Object.entries(w)) { x -= v; if (x <= 0) return a; }
+  return "atk";
 }
 
 // ---------- 연결 ----------
@@ -437,7 +513,7 @@ function createRoom() {
 
 function newPlayer(pid, name, team, conn) {
   return { pid, name: name || "이름없음", team, conn, look: randomLook(), ready: false,
-    st: { ...BASE }, hp: 0, pts: 0, pick: null, target: null, gone: false };
+    st: { ...BASE }, hp: 0, pts: 0, pick: null, target: null, gone: false, hist: [] };
 }
 const P = pid => room.players.find(p => p.pid === pid);
 const active = p => p.hp > 0 && !p.gone;
@@ -474,7 +550,10 @@ function hostHandle(pid, m, conn) {
     if (m.key === "hp") p.hp += STAT_UP.hp;
   } else if (m.t === "again" && pid === "host" && room.phase === "over") {
     room.players = room.players.filter(q => !q.gone);
-    room.phase = "lobby";
+    if (room.ai != null) {   // AI 대결은 바로 꾸미기로 (AI는 새로 만들어요)
+      room.players = room.players.map(q => (q.bot ? newBot(q.pid, q.name, q.team) : Object.assign(q, { ready: false, hist: [] })));
+      room.phase = "custom";
+    } else room.phase = "lobby";
   } else if (m.t === "pick" && room.phase === "battle") {
     if (!active(p) || p.pick || !ACTS[m.act]) return;
     let target = null;
@@ -491,8 +570,9 @@ function hostHandle(pid, m, conn) {
 
 function startBattle() {
   room.phase = "battle"; room.round = 1; room.roundNo = 0; room.events = [];
-  room.players.forEach(p => { if (!p.gone) p.hp = p.st.hp; p.pts = 0; p.pick = null; p.target = null; });
+  room.players.forEach(p => { if (!p.gone) p.hp = p.st.hp; p.pts = 0; p.pick = null; p.target = null; p.hist = []; });
   checkEnd();
+  botTurn();
   sync();
 }
 
@@ -529,11 +609,13 @@ function resolve() {
       hurt(t.pid, power); ev.push({ k: "atk", heavy: isHeavy, who: p.pid, to: t.pid, dmg: power, broke: isHeavy && t.pick === "def" });
     }
   });
+  acting.forEach(p => { p.hist.push(p.pick); if (p.hist.length > 10) p.hist.shift(); });   // AI가 버릇을 읽을 때 써요
   room.players.forEach(p => { p.hp = Math.max(0, p.hp - (dmg[p.pid] || 0)); p.pick = null; p.target = null; });
   // 4) 라운드가 끝나면 살아 있는 사람은 스탯 포인트를 받아요
   room.players.forEach(p => { if (active(p)) p.pts += ROUND_POINTS; });
   room.events = ev; room.roundNo++; room.round++;
   checkEnd();
+  botTurn();
   sync();
 }
 
@@ -566,7 +648,7 @@ function playerLeft(pid) {
 function viewFor(pid) {
   const p = P(pid);
   return {
-    me: pid, code: room.code, s: room.s, phase: room.phase, round: room.round,
+    me: pid, code: room.code, ai: room.ai, s: room.s, phase: room.phase, round: room.round,
     roundNo: room.roundNo, events: room.events, totals: room.totals, winner: room.winner,
     players: room.players.map(q => ({ pid: q.pid, name: q.name, team: q.team, look: q.look, ready: q.ready,
       hp: q.hp, max: q.st.hp, picked: !!q.pick, gone: q.gone })),
@@ -721,7 +803,7 @@ function renderBattle(v) {
     panel = `<div class="center"><h2 style="font-size:1.7rem">${win}</h2>
       <div>${who}</div>
       <div class="sub">${v.round - 1}라운드 · 남은 체력 ${TEAMS[0]} ${v.totals[0]} : ${v.totals[1]} ${TEAMS[1]}</div>
-      ${isHost ? `<button class="btn" onclick="send({t:'again'})">같은 방에서 다시 하기</button>` : `<div class="sub" style="margin-top:8px">방장이 다시 시작하면 같이 할 수 있어요.</div>`}
+      ${isHost ? `<button class="btn" onclick="send({t:'again'})">${v.ai != null ? "다시 하기" : "같은 방에서 다시 하기"}</button>` : `<div class="sub" style="margin-top:8px">방장이 다시 시작하면 같이 할 수 있어요.</div>`}
       <button class="btn gray" onclick="menu()">처음 메뉴로</button></div>`;
   } else if (!alive) {
     panel = `<div class="center"><h2>💀 쓰러졌어요</h2><div class="sub">우리 팀을 응원해 주세요!</div></div>`;
@@ -747,7 +829,7 @@ function renderBattle(v) {
         `<button onclick="statUp('${k}')">${s.label}<small>+${STAT_UP[k]}</small></button>`).join("")}</div></div>` : "";
 
   show(`
-    <div class="center" style="font-weight:bold;margin-bottom:8px">${v.phase === "over" ? "게임 끝!" : `라운드 ${v.round}`}</div>
+    <div class="center" style="font-weight:bold;margin-bottom:8px">${v.phase === "over" ? "게임 끝!" : `라운드 ${v.round}`}${v.ai != null ? ` · 🤖 AI ${AI_LEVELS[v.ai]}` : ""}</div>
     <div class="arena">
       <div class="far-row">${foes.map(p => fighter(p, v, myTeam, "far")).join("")}</div>
       <div class="near-row">${left.map(p => fighter(p, v, myTeam, "ally")).join("")}${fighter(meP, v, myTeam, "me")}${right.map(p => fighter(p, v, myTeam, "ally")).join("")}</div>
