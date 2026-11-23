@@ -10,16 +10,16 @@
 <script>
 // ===============================
 // 🕶️ 수능 감독관 — AI 안경과 초소형 카메라를 찾아서 부숴라!
-//  · 감독관: 교실을 걸어 다니며 AI 안경 / 초소형 카메라를 쓰는 수험생을 찾아 검사(클릭)해요.
+//  · 감독관: 교실을 걸어 다니며 AI 안경 / 초소형 카메라를 쓰는 수험생을 찾아 망치로 부숴요(클릭).
 //  · 수험생: AI 안경을 몰래 갈아 끼우거나 카메라를 켜서 문제를 풀고, 끝까지 안 들키면 성공!
 // ===============================
 const ROOM_PREFIX = "vibe03-suneung/";  // 다른 게임과 방 코드가 겹치지 않게 붙이는 말
 const MAX_PEOPLE = 17;                  // 감독관 1명 + 수험생 16명
 const SEATS = 16;                       // 교실 자리 (빈 자리는 AI 수험생이 채워요)
 const SWAP = 1.4;                       // 안경 갈아 끼우는 데 걸리는 시간(초)
-const RANGE = 2.6;                      // 감독관이 검사할 수 있는 거리(m)
-const FREEZE = 4;
-const LINGER = 2;                       // AI 안경 · 카메라를 숨긴 뒤에도 2초 동안은 검사하면 걸려요                       // 잘못 검사했을 때 사과하느라 못 움직이는 시간(초)
+const RANGE = 2.6;                      // 감독관 망치가 닿는 거리(m)
+const FREEZE = 4;                       // 정직한 학생 안경을 부쉈을 때 사과하느라 못 움직이는 시간(초)
+const LINGER = 2;                       // AI 안경 · 카메라를 숨긴 뒤에도 2초 동안은 부수면 걸려요
 const BROKERS = [
   { url: "wss://mqtt.eclipseprojects.io/mqtt" },
   { url: "wss://public.cloud.shiftr.io", username: "public", password: "public" },
@@ -166,8 +166,8 @@ const ROOM = { x0: -5.8, x1: 5.8, z0: -7, z1: 6.4 };
   <div id="paper"></div>
   <div id="caughtbox"></div>
   <div id="joy"><i></i></div>
-  <button id="inspectBtn">🔍<br>검사</button>
-  <div id="lockhint"><div>🖱️ 화면을 클릭하면 시작해요<br><small>WASD 이동 · 마우스로 보기 · 클릭으로 검사 · ESC 마우스 풀기</small></div></div>
+  <button id="inspectBtn">🔨<br>부수기</button>
+  <div id="lockhint"><div>🖱️ 화면을 클릭하면 시작해요<br><small>WASD 이동 · 마우스로 보기 · 클릭으로 안경 부수기 · ESC 마우스 풀기</small></div></div>
 </div>
 <div id="ui"></div>
 <div id="toast"></div>
@@ -345,11 +345,11 @@ function menu(err = "") {
       <ul class="rules">
         <li>시작하면 <b>감독관 1명</b>이 정해지고, 나머지는 모두 <b>수험생</b>이 돼요.</li>
         <li>빈 자리(16자리)는 <b>AI 수험생</b>이 채워요. AI 중에는 몰래 AI 안경·카메라를 쓰는 애도, 정직한 애도 있어요.</li>
-        <li>🧑‍🎓 <b>수험생</b>: <b>G</b>로 일반 안경 ↔ <b>AI 안경</b>을 갈아 끼우면 정답이 보여요. <b>C</b>는 초소형 카메라.
+        <li>🧑‍🎓 <b>수험생</b>: <b>G</b>로 <b>AI 안경</b>을 끼우면 정답이 보여요 (안경을 안 쓰던 사람도 쓸 수 있어요). <b>C</b>는 초소형 카메라.
           끝까지 안 들키고 <b>모든 문제를 풀면 성공!</b></li>
-        <li>👮 <b>감독관</b>: 걸어 다니며 수상한 수험생을 가까이서 <b>검사</b>해요. AI 안경에는 <b>동그란 카메라</b>가 달려 있어요.
-          숨긴 뒤에도 <b>2초 동안은</b> 검사하면 잡혀요!
-          들키면 장비를 부숴요! 정직한 학생을 검사하면 4초 동안 사과해야 해요.</li>
+        <li>👮 <b>감독관</b>: 걸어 다니며 수상한 수험생의 안경을 가까이서 🔨 <b>망치로 부숴요</b>. AI 안경에는 <b>동그란 카메라</b>가 달려 있어요.
+          숨긴 뒤에도 <b>2초 동안은</b> 부수면 잡혀요!
+          정직한 학생의 안경을 부수면 4초 동안 사과해야 해요.</li>
       </ul>
     </div>
     <div class="err">${esc(err)}</div>`);
@@ -458,12 +458,12 @@ function hostStart() {
   room.phase = "play";
   toAll({ t: "go", proctor, total, endIn: room.minutes * 60000,
     names: Object.fromEntries(humans.map(p => [p.pid, p.name])),
-    students: students.map(s => ({ sid: s.sid, look: s.look, pid: s.pid })) });
+    students: students.map(s => ({ sid: s.sid, look: s.look, pid: s.pid, base: s.pid ? s.base : undefined })) });
   clearInterval(G.loop); G.loop = setInterval(hostTick, 50);
 }
 function newStudent(sid, kind, pid, total) {
   const { x, z } = seatPos(sid);
-  const base = kind === "human" ? 1 : (Math.random() < 0.55 ? 1 : 0);   // 1 일반 안경 · 0 안경 안 씀
+  const base = Math.random() < 0.55 ? 1 : 0;   // 1 일반 안경 · 0 안경 안 씀 (사람도 AI도 섞여 있어요)
   const s = { sid, kind, pid, x, z, base, g: base, swFrom: base, swTo: -1, swP: 0, cam: 0, act: 0, actT: 0, yaw: 0, pitch: -0.6,
     ty: 0, tp: -0.6, lookT: rand(0, 3), caught: false, solved: 0, total, timer: rand(2, 9), alarm: 0,
     react: rand(0.25, 1.3), careless: Math.random() < 0.2, nervous: Math.random() < 0.5, susp: 0,
@@ -500,7 +500,12 @@ function doInspect(sid) {
   if (!s || s.caught || P.frozen > 0) return;
   if (Math.hypot(s.x - P.x, s.z - P.z) > RANGE + 0.9) return;
   if (catchable(s)) catchStudent(s, "pro");
-  else { G.strikes++; P.frozen = FREEZE; toAll({ t: "fx", k: "wrong", sid }); }
+  else {   // 정직한 학생! 일반 안경이면 그 안경이 부서져요
+    G.strikes++; P.frozen = FREEZE;
+    const broke = s.g === 1;
+    if (broke) { s.g = s.base = 0; s.swFrom = 0; }
+    toAll({ t: "fx", k: "wrong", sid, broke });
+  }
 }
 function catchStudent(s, by) {
   const dev = cheating(s) ? devOf(s) : (s.lastDev || "glasses");
@@ -733,7 +738,7 @@ function showLobby(v) {
     </div>
     <div class="card sub">
       <b>조작</b><br>
-      👮 감독관: WASD 이동 · 마우스로 보기 · 클릭 검사 (휴대폰: 왼쪽 조이스틱 · 화면 끌기 · 검사 버튼)<br>
+      👮 감독관: WASD 이동 · 마우스로 보기 · 클릭으로 부수기 (휴대폰: 왼쪽 조이스틱 · 화면 끌기 · 🔨 버튼)<br>
       🧑‍🎓 수험생: 화면 끌어서 둘러보기 · <b>G</b> 안경 바꾸기 · <b>C</b> 카메라 · <b>1~5</b> 답 고르기 · <b>R</b> 시험지 보기
     </div>`);
 }
@@ -765,8 +770,8 @@ function textSprite(text, bg, fg = "#fff", sw = 0.62) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   s.scale.set(sw, sw * 72 / 256, 1); s.renderOrder = 10; return s;
 }
-// AI 안경 카메라 테두리는 빛나요 (멀리서도 동그란 카메라가 확실히 보이게)
-let AI_RING, CAM_LED;
+// 초소형 카메라(가슴 단추)의 빨간 불빛
+let CAM_LED;
 
 function init3D() {
   if (R) return true;
@@ -781,7 +786,6 @@ function init3D() {
   camera.rotation.order = "YXZ";
   scene.add(new THREE.HemisphereLight(0xffffff, 0x8d7b66, 0.8));
   const sun = new THREE.DirectionalLight(0xfff7e8, 0.55); sun.position.set(-6, 9, 3); scene.add(sun);
-  AI_RING = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
   CAM_LED = new THREE.MeshBasicMaterial({ color: 0xff2020 });
   R = { renderer, scene, camera, students: [], hit: [], fx: [], tags: [], obst: [] };
   buildRoom(scene);
@@ -899,13 +903,11 @@ function makeGlasses(ai) {
   }
   mesh(box(0.018, 0.008, 0.007), frame, 0, 0.012, 0, g);                     // 코 다리
   if (ai) {
-    // 오른쪽 경첩에 달린 동그란 초소형 카메라 (잘 보이게 크고 빛나게!)
-    const c = new THREE.Group(); c.position.set(0.09, 0.016, -0.01); c.scale.setScalar(1.35); g.add(c);
-    const body = mesh(cyl(0.019, 0.026, 20), pho(0x1f2937), 0, 0, 0, c); body.rotation.x = Math.PI / 2;
-    const ln = mesh(cyl(0.012, 0.008, 20), pho(0x0a1f3d, { shininess: 200, specular: 0xffffff }), 0, 0, -0.014, c); ln.rotation.x = Math.PI / 2;
-    const rg = mesh(geo("aring", () => new THREE.TorusGeometry(0.0145, 0.003, 8, 24)), AI_RING, 0, 0, -0.0145, c);
-    mesh(sph(0.0035, 8, 6), bas(0xffffff), -0.004, 0.004, -0.019, c);
-    mesh(sph(0.004, 8, 6), CAM_LED, 0.0, 0.021, -0.006, c);
+    // 오른쪽 경첩에 달린 작고 동그란 초소형 카메라 (뿔테와 같은 색이라 가까이서 잘 봐야 보여요)
+    const c = new THREE.Group(); c.position.set(0.079, 0.012, -0.007); g.add(c);
+    const body = mesh(cyl(0.0105, 0.012, 20), frame, 0, 0, 0, c); body.rotation.x = Math.PI / 2;
+    const ln = mesh(cyl(0.0055, 0.004, 16), pho(0x050505, { shininess: 200, specular: 0xffffff }), 0, 0, -0.0065, c); ln.rotation.x = Math.PI / 2;
+    mesh(sph(0.0016, 6, 4), bas(0xffffff), -0.002, 0.002, -0.0088, c);   // 렌즈 반짝임
     // 왼쪽에는 배터리 상자
     mesh(box(0.014, 0.018, 0.04), frame, -0.085, 0.006, 0.03, g);
   }
@@ -1020,7 +1022,7 @@ function startView(m) {
   hideUI();
   SND.bell();
   toast(V.role === "pro" ? "👮 당신은 <b>감독관</b>이에요!<br>AI 안경(동그란 카메라)과 초소형 카메라를 찾아 부수세요"
-    : "🧑‍🎓 당신은 <b>수험생</b>이에요!<br>G로 AI 안경을 몰래 끼우고 감독관에게 들키지 마세요<br><small>숨긴 뒤 2초 동안은 검사하면 걸려요!</small>", 4200);
+    : "🧑‍🎓 당신은 <b>수험생</b>이에요!<br>G로 AI 안경을 몰래 끼우고 감독관에게 들키지 마세요<br><small>숨긴 뒤 2초 동안은 감독관이 부수면 걸려요!</small>", 4200);
   renderHudTop();
 }
 function endGameView() {
@@ -1063,9 +1065,16 @@ function playFx(m) {
   }
   if (m.k === "wrong" && o) {
     SND.wrong();
+    if (m.broke) {
+      smashFx(m.sid, "normal");
+      if (EX && m.sid === V.mySid && EX.swTo < 0 && EX.g === 1) {   // 내 일반 안경이 부서졌어요
+        EX.g = EX.sf = EX.base = 0; renderPaper(); exSend(true);
+        toast("😱 감독관이 내 일반 안경을 부쉈어요! (AI 안경은 아직 있어요)");
+      }
+    }
     const q = textSprite("😠 억울해요!", "#f59e0b", "#111", 0.6); q.position.set(0, 1.62, 0); o.root.add(q);
     R.fx.push({ obj: q, parent: o.root, life: 1.8, sprite: true });
-    if (V.role === "pro") toast("🙅 정직한 수험생이었어요! 4초 동안 사과해야 해요");
+    if (V.role === "pro") toast(m.broke ? "🙅 정직한 수험생의 안경을 부쉈어요! 4초 동안 사과해야 해요" : "🙅 정직한 수험생이었어요! 4초 동안 사과해야 해요");
   }
   if (m.k === "proleft") toast("👮 감독관이 나가서 🤖 AI 감독관이 이어받았어요!", 3000);
 }
@@ -1076,7 +1085,7 @@ function smashFx(sid, dev) {
   const at = dev === "cam" ? new THREE.Vector3(x + 0.07, 0.92, z - 0.15) : new THREE.Vector3(x, 1.18, z - 0.14);
   if (o && dev !== "cam") { o.head.updateWorldMatrix(true, false); o.head.localToWorld(at.set(0, 0.13, -0.12)); }
   const g = geo("shard", () => new THREE.TetrahedronGeometry(0.018));
-  const cols = [0x22d3ee, 0xbfe6ff, 0x111111, 0xffffff, 0x0e7490];
+  const cols = dev === "cam" ? [0x111111, 0x0a1f3d, 0xff2020, 0x444444] : [0x3a2213, 0x1f120a, 0x6b4426, 0xbfe6ff, 0xffffff];   // 뿔테 조각 + 렌즈 조각
   for (let i = 0; i < 34; i++) {
     const s = mesh(g, bas(pick(cols), { transparent: true }), at.x, at.y, at.z, R.scene);
     s.userData.v = new THREE.Vector3(rand(-1.4, 1.4), rand(0.6, 2.2), rand(-1.6, 0.6));
@@ -1145,7 +1154,8 @@ function makeQuestion() {
   return { q: g.q, ch, ans: ch.indexOf(ans) };
 }
 function startExam() {
-  EX = { g: 1, sf: 1, swTo: -1, swP: 0, cam: 0, actT: 0, yaw: 0, pitch: -0.75, qs: Array.from({ length: V.total }, makeQuestion), qi: 0, solved: 0,
+  const base = (V.students.find(s => s.sid === V.mySid) || {}).base === 0 ? 0 : 1;
+  EX = { g: base, sf: base, base, swTo: -1, swP: 0, cam: 0, actT: 0, yaw: 0, pitch: -0.75, qs: Array.from({ length: V.total }, makeQuestion), qi: 0, solved: 0,
     lock: 0, ana: 0, camAna: 0, caught: false, sendT: 0, drag: null, lastHint: "" };
   $("paper").style.display = "block";
   $("help").style.display = "none";   // 수험생 조작 설명은 시험지 아래에 보여요
@@ -1161,7 +1171,7 @@ function renderPaper() {
     <div class="q">${EX.qi + 1}. ${esc(q.q)}</div>
     <div class="ch">${q.ch.map((v, i) => `<button id="ch${i}" onclick="answer(${i})">${CIRCLED[i]} ${esc(v)}</button>`).join("")}</div>`}
     <div class="tools">
-      <button id="tgl" class="${EX.g === 2 ? "ai" : ""}" onclick="swapGlasses()" ${EX.caught || swapping ? "disabled" : ""}>👓 ${EX.g === 2 ? "AI 안경 쓰는 중" : "일반 안경"} (G)</button>
+      <button id="tgl" class="${EX.g === 2 ? "ai" : ""}" onclick="swapGlasses()" ${EX.caught || swapping ? "disabled" : ""}>👓 ${EX.g === 2 ? `AI 안경 벗기` : "AI 안경 쓰기"} (G)</button>
       <button id="tcam" class="${EX.cam ? "camon" : ""}" onclick="toggleCam()" ${EX.caught ? "disabled" : ""}>📷 카메라 ${EX.cam ? "켜짐" : "꺼짐"} (C)</button>
       <button onclick="lookPaper()">📄 시험지 (R)</button>
     </div>
@@ -1178,7 +1188,7 @@ function answer(i) {
 }
 function swapGlasses() {
   if (!EX || EX.caught || EX.swTo >= 0) return;
-  EX.sf = EX.g; EX.swTo = EX.g === 2 ? 1 : 2; EX.swP = 0;
+  EX.sf = EX.g; EX.swTo = EX.g === 2 ? EX.base : 2; EX.swP = 0;
   renderPaper(); exSend(true);
 }
 function toggleCam() {
@@ -1266,7 +1276,7 @@ function startProctor() {
   PR = { x: 0, z: -5.2, yaw: Math.PI, pitch: -0.15, sendT: 0, cool: 0, aim: -1, aimD: 99, joy: { x: 0, y: 0 } };
   $("cross").style.display = "block";
   $("help").style.display = "block";
-  $("help").innerHTML = IS_TOUCH ? "조이스틱: 이동 · 화면 끌기: 보기 · 🔍 검사" : "WASD 이동 · Shift 빨리 · 마우스로 보기 · 클릭 검사";
+  $("help").innerHTML = IS_TOUCH ? "조이스틱: 이동 · 화면 끌기: 보기 · 🔨 부수기" : "WASD 이동 · Shift 빨리 · 마우스로 보기 · 클릭으로 안경 부수기";
   if (IS_TOUCH) { $("joy").style.display = "block"; $("inspectBtn").style.display = "block"; }
 }
 function blocked(x, z) {
@@ -1305,7 +1315,7 @@ function prTick(dt) {
   $("cross").className = near ? "hot" : "";
   const aim = $("aim");
   aim.style.display = PR.aim >= 0 ? "block" : "none";
-  if (PR.aim >= 0) aim.innerHTML = `수험번호 ${String(PR.aim + 1).padStart(2, "0")} · ${near ? (IS_TOUCH ? "🔍 검사 버튼!" : "🔍 클릭해서 검사") : "더 가까이 가야 검사할 수 있어요"}`;
+  if (PR.aim >= 0) aim.innerHTML = `수험번호 ${String(PR.aim + 1).padStart(2, "0")} · ${near ? (IS_TOUCH ? "🔨 부수기 버튼!" : "🔨 클릭해서 안경 부수기") : "더 가까이 가야 망치가 닿아요"}`;
   if (PR.cool > 0) PR.cool -= dt;
   // 방장에게 내 위치 보내기
   if (isHost && G) { Object.assign(G.pro, { x: PR.x, z: PR.z, yaw: PR.yaw, pitch: PR.pitch, mv: moving }); }
@@ -1315,9 +1325,11 @@ function prTick(dt) {
 function inspect() {
   if (!PR || !V || V.over || PR.cool > 0) return;
   if (V.pro.frozen || (isHost && G && G.pro.frozen > 0)) return;
-  if (PR.aim < 0) return toast("수험생을 가운데 십자선에 맞추고 검사하세요");
-  if (PR.aimD > RANGE) return toast("🚶 더 가까이 가서 검사하세요");
+  if (PR.aim < 0) return toast("수험생을 가운데 십자선에 맞추고 부수세요");
+  if (PR.aimD > RANGE) return toast("🚶 더 가까이 가야 망치가 닿아요");
   PR.cool = 0.7;
+  $("hammer").classList.remove("swing"); void $("hammer").offsetWidth; $("hammer").classList.add("swing");
+  noise(0.12, 0.15, 3000);
   send({ t: "inspect", sid: PR.aim });
 }
 
@@ -1426,7 +1438,6 @@ function frame(t) {
     o.head.rotation.x += (clamp(pitch, -0.38, 0.4) - o.head.rotation.x) * Math.min(1, dt * 8);
     o.tag.visible = !!c.caught;
   }
-  AI_RING.color.setHSL(0.52, 1, 0.5 + Math.sin(now * 5) * 0.12);
   // 감독관 모습
   const P = R.pro, tp = V.pro;
   if (P.root.visible) {
@@ -1462,7 +1473,7 @@ function renderHudTop() {
   const caughtN = V.cs.filter(c => c.caught).length;
   const role = V.role === "pro" ? "👮 감독관" : V.role === "exam" ? "🧑‍🎓 수험생" : "👀 관전";
   let extra = "";
-  if (V.role === "pro") extra = `<span class="pill">💥 적발 ${caughtN}</span><span class="pill">🙅 오인 ${V.strikes}</span>`;
+  if (V.role === "pro") extra = `<span class="pill">💥 적발 ${caughtN}</span><span class="pill">🙅 실수 ${V.strikes}</span>`;
   else if (V.role === "exam" && EX) extra = `<span class="pill">✏️ ${EX.solved}/${V.total}</span>${EX.g === 2 ? `<span class="pill" style="color:#67e8f9">👓 AI 안경</span>` : ""}${EX.cam ? `<span class="pill" style="color:#fca5a5">📷 카메라 ON</span>` : ""}`;
   else extra = `<span class="pill">💥 적발 ${caughtN}</span>`;
   $("hudtop").innerHTML = (V.over && V.endHtml ? `<span class="pill" style="pointer-events:auto;cursor:pointer;background:#4338ca" onclick="show(V.endHtml, true)">📋 결과 보기</span>` : "") + `<span class="pill">${role}</span><span class="pill time ${left < 15000 ? "warn" : ""}">⏱ ${fmtTime(left)}</span>${extra}`;
@@ -1496,7 +1507,7 @@ function showEnd(m) {
   V.endHtml = `
       <div class="card">
         <div class="big">${title}</div>
-        <div class="sub center">감독관: ${esc(m.proName)} · 부정행위 ${cheaters}명 중 <b>${caught}명 적발</b> · 오인 검사 ${num(m.strikes)}번</div>
+        <div class="sub center">감독관: ${esc(m.proName)} · 부정행위 ${cheaters}명 중 <b>${caught}명 적발</b> · 정직한 학생 안경 부숨 ${num(m.strikes)}번</div>
       </div>
       <div class="card">
         <h2>🧑‍🎓 사람 수험생 결과</h2>
