@@ -188,6 +188,11 @@ let save = { coins: 0, gems: 0, owned: { pistol: true }, best: 0, bestBy: {}, cl
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = Object.assign(save, s); } catch (e) {}
 save.owned.pistol = true; save.bestBy = save.bestBy || {}; save.clearBy = save.clearBy || {};
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+// 브라우저가 저장 공간을 마음대로 지우지 않게 부탁해요 (지원하는 브라우저만)
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+// 게임 중에 번 코인·젬은 바로 저장해요 (중간에 창을 닫아도 안 사라지게)
+function giveReward(c, g) { if (!c && !g) return; save.coins += c; save.gems += g; if (G) { G.earnC += c; G.earnG += g; } writeSave(); }
+function bankKills() { const c = Math.floor(G.kills / 2) - Math.floor(G.killsPaid / 2); G.killsPaid = G.kills; return c; }
 
 // ---------- 타워 데이터 ----------
 const DEFS = {
@@ -681,7 +686,7 @@ function newGame(diffKey) {
   scene.remove(world); world = new THREE.Group(); scene.add(world);
   enemies = []; towers = []; vehicles = []; rockets = []; fxs = []; tracers = []; freeTracers = [];
   occ = new Map(); placing = null; selected = null;
-  G = { diffKey, diff, maxW: diff.waves, hp: diff.baseHp, cash: diff.cash, wave: 0, cleared: 0, waveActive: false, waveT: 0, paid: 0, queue: [], spawnT: 0, auto: false, autoT: 0, speed: 1, kills: 0, bossGems: 0, time: 0, over: false, hpMul: 1 };
+  G = { diffKey, diff, maxW: diff.waves, hp: diff.baseHp, cash: diff.cash, wave: 0, cleared: 0, waveActive: false, waveT: 0, paid: 0, queue: [], spawnT: 0, auto: false, autoT: 0, speed: 1, kills: 0, killsPaid: 0, earnC: 0, earnG: 0, time: 0, over: false, hpMul: 1 };
   rangeRing.visible = false; ghost.visible = false; world.add(rangeRing); world.add(ghost);
   mode = "game";
   $("menu").classList.add("hidden"); $("hud").classList.remove("hidden");
@@ -717,6 +722,9 @@ function payWave(w, skipped) {
   floatText("+$" + bonus + (skipped ? " 스킵 보너스" : " 웨이브 보너스"), window.innerWidth / 2, window.innerHeight * 0.4, "#4ade80");
   for (const t of towers) if (t.type === "farm") { const inc = t.def.levels[t.lvl].income; G.cash += inc; floatAt("+$" + inc, t.x, 1.5, t.z, "#facc15"); }
   G.paid = w;
+  // 웨이브를 넘길 때마다 코인 (5웨이브마다 젬 1개) 을 바로 저장
+  giveReward(Math.round(20 * G.diff.coinMul) + bankKills(), w % 5 === 0 ? 1 : 0);
+  save.best = Math.max(save.best, w); save.bestBy[G.diffKey] = Math.max(save.bestBy[G.diffKey] || 0, w); writeSave();
 }
 function startWave() {
   if (!G || G.over || G.wave >= G.maxW) return;
@@ -753,7 +761,7 @@ function hurt(e, amt, pierceArmor) {
   if (e.hp <= 0) {
     e.dead = true; G.cash += e.reward; G.kills++;
     addFx("exp", e.pos.x, 0.8, e.pos.z, e.def.boss ? 3 : 0.8, e.def.boss ? 0xa855f7 : 0xffaa33, 0.3);
-    if (e.def.boss) { G.bossGems += 3; floatAt("+💎3", e.pos.x, 3, e.pos.z, "#67e8f9"); }
+    if (e.def.boss) { giveReward(0, 3); floatAt("+💎3", e.pos.x, 3, e.pos.z, "#67e8f9"); }
     removeEnemy(e);
   }
 }
@@ -1038,9 +1046,9 @@ function endGame(win) {
   G.over = true; G.waveActive = false;
   const D = G.diff, cleared = win ? G.maxW : G.cleared;
   const first = win && D.firstGem && !save.clearBy[G.diffKey] ? D.firstGem : 0;
-  const coins = Math.round(cleared * 20 * D.coinMul) + Math.floor(G.kills / 2) + (win ? D.winCoin : 0);
-  const gems = Math.floor(cleared / 5) + G.bossGems + (win ? D.winGem : 0) + first;
-  save.coins += coins; save.gems += gems; save.best = Math.max(save.best, cleared);
+  giveReward(bankKills() + (win ? D.winCoin : 0), (win ? D.winGem : 0) + first);
+  const coins = G.earnC, gems = G.earnG;
+  save.best = Math.max(save.best, cleared);
   save.bestBy[G.diffKey] = Math.max(save.bestBy[G.diffKey] || 0, cleared); if (win) save.clearBy[G.diffKey] = true; writeSave();
   $("resTitle").textContent = win ? (D.cursed ? "💀 저주를 깨뜨렸다! 💀" : "🏆 승리! " + D.name + " 클리어") : "💥 기지가 무너졌어요";
   $("resBody").innerHTML = `난이도: <b>${D.icon} ${D.name}</b><br>버틴 웨이브: <b>${cleared} / ${G.maxW}</b><br>${first ? `<b style="color:#d8b4fe">첫 클리어 보너스 💎${first}!</b><br>` : ""}처치한 적: <b>${G.kills}</b><br>획득: <b style="color:#facc15">🪙 ${coins}</b> &nbsp; <b style="color:#67e8f9">💎 ${gems}</b>`;
