@@ -64,6 +64,19 @@
   #banner { position: fixed; top: 30%; left: 0; right: 0; text-align: center; z-index: 15; font-size: 2.6rem; font-weight: 900; text-shadow: 0 4px 16px #000; pointer-events: none; opacity: 0; transition: opacity .4s; }
   .ft { position: fixed; z-index: 12; font-weight: 900; pointer-events: none; text-shadow: 0 2px 4px #000; animation: up 1.2s ease-out forwards; transform: translate(-50%, -50%); white-space: nowrap; }
   @keyframes up { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
+  .dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
+  .dc { border-radius: 16px; padding: 14px; text-align: left; color: #fff; border: 2px solid #ffffff22; display: flex; flex-direction: column; gap: 6px; font-family: inherit; }
+  .dc .t { font-size: 1.3rem; font-weight: 900; }
+  .dc .d { font-size: .85rem; line-height: 1.5; opacity: .92; flex: 1; }
+  .dc .b { font-size: .8rem; font-weight: 800; background: #0004; border-radius: 8px; padding: 4px 8px; }
+  .dc:hover { transform: translateY(-2px); border-color: #fff8; }
+  .d-easy { background: linear-gradient(160deg, #16a34a, #14532d); }
+  .d-normal { background: linear-gradient(160deg, #2563eb, #1e3a8a); }
+  .d-hard { background: linear-gradient(160deg, #dc2626, #7f1d1d); }
+  .d-cursed { background: linear-gradient(160deg, #581c87, #0a0010); border-color: #a855f7; box-shadow: 0 0 18px #a855f788; animation: curse 2.4s infinite; }
+  @keyframes curse { 0%, 100% { box-shadow: 0 0 14px #a855f766; } 50% { box-shadow: 0 0 28px #dc2626aa; } }
+  body.cursed .stat, body.cursed .hbtn, body.cursed .card { border-color: #7e22ce; }
+  body.cursed #banner { color: #f0abfc; }
   .res { text-align: center; font-size: 1.15rem; line-height: 1.9; margin: 14px 0; }
   @media (max-width: 600px) {
     #panel { top: auto; bottom: 96px; right: 8px; left: 8px; width: auto; }
@@ -81,7 +94,7 @@
   <div class="box">
     <h1>🛡️ 3D 타워 디펜스</h1>
     <p class="sub">적들이 기지에 닿기 전에 막아라!</p>
-    <div class="wallet"><span class="pill">🪙 <b class="coinTxt">0</b> 코인</span><span class="pill">💎 <b class="gemTxt">0</b> 젬</span><span class="pill">🏆 최고 <b id="bestTxt">0</b> 웨이브</span></div>
+    <div class="wallet"><span class="pill">🪙 <b class="coinTxt">0</b> 코인</span><span class="pill">💎 <b class="gemTxt">0</b> 젬</span><span class="pill">🏆 클리어 <b id="bestTxt">-</b></span></div>
     <div class="bigbtns">
       <button class="big play" id="playBtn">▶ 플레이</button>
       <button class="big shopb" id="shopBtn">🛒 캐릭터 구매</button>
@@ -89,8 +102,10 @@
     <div class="help">
       · 아래 카드를 눌러 타워를 고르고 땅(풀밭)을 눌러 설치해요. 설치한 타워를 누르면 업그레이드 / 판매할 수 있어요.<br>
       · 보라색 <b>감전병</b>과 <b>보스</b>는 주변 타워를 <b>기절</b>시켜요. <b>메딕</b>을 근처에 두면 기절이 빨리 풀려요.<br>
-      · 게임이 끝나면 버틴 웨이브만큼 <b>🪙 코인</b>을 받아요. <b>💎 젬</b>은 5웨이브마다 1개, 보스를 잡으면 3개, 30웨이브 클리어 시 15개!<br>
-      · 화면을 드래그하면 카메라 회전, 휠 / 두 손가락으로 확대·축소. 단축키: 1~8 타워 선택, Space 웨이브 시작, Esc 취소
+      · 난이도: 이지 15웨이브 · 보통 20웨이브 · 하드 25웨이브 · <b style="color:#d8b4fe">저주받은 모드 35웨이브</b><br>
+      · 게임이 끝나면 버틴 웨이브만큼 <b>🪙 코인</b>을 받아요. <b>💎 젬</b>은 5웨이브마다 1개, 보스를 잡으면 3개, 그리고 클리어 보상! <b style="color:#d8b4fe">저주받은 모드를 깨면 젬이 왕창!</b><br>
+      · 화면을 드래그하면 카메라 회전, 휠 / 두 손가락으로 확대·축소. 단축키: 1~8 타워 선택, E 업그레이드, Space 웨이브 시작 / 스킵, Esc 취소<br>
+      · 적이 다 죽으면 3초 뒤 다음 웨이브가 자동으로 시작돼요. 웨이브 시작 후 12초가 지나면 <b>⏭ 스킵</b>으로 다음 웨이브를 바로 불러올 수 있고(보너스 $25), <b>🔁 오토스킵</b>을 켜면 알아서 스킵해요.
     </div>
   </div>
 </div>
@@ -101,6 +116,14 @@
     <div class="row"><h1 style="text-align:left">🛒 캐릭터 구매</h1><button class="back" id="shopBack">← 메뉴</button></div>
     <div class="wallet" style="justify-content:flex-start;margin:10px 0 0"><span class="pill">🪙 <b class="coinTxt">0</b></span><span class="pill">💎 <b class="gemTxt">0</b></span></div>
     <div class="grid" id="shopGrid"></div>
+  </div>
+</div>
+
+<!-- 난이도 선택 -->
+<div id="diff" class="overlay hidden">
+  <div class="box">
+    <div class="row"><h1 style="text-align:left">난이도 선택</h1><button class="back" id="diffBack">← 메뉴</button></div>
+    <div class="dgrid" id="diffGrid"></div>
   </div>
 </div>
 
@@ -118,10 +141,10 @@
   <div id="top">
     <span class="stat">❤️ <b id="hpTxt">100</b></span>
     <span class="stat">💵 <b id="cashTxt">0</b></span>
-    <span class="stat">🌊 <b id="waveTxt">0</b>/30</span>
+    <span class="stat">🌊 <b id="waveTxt">0</b>/<b id="maxTxt">30</b></span><span class="stat" id="diffTxt"></span>
     <button class="hbtn go" id="waveBtn">▶ 웨이브 시작</button>
     <button class="hbtn" id="speedBtn">⏩ 1x</button>
-    <button class="hbtn" id="autoBtn">🔁 자동</button>
+    <button class="hbtn" id="autoBtn">🔁 오토스킵</button>
     <button class="hbtn" id="quitBtn">🏳️ 포기</button>
   </div>
   <div id="cards"></div>
@@ -142,16 +165,28 @@
 // =====================================================
 // 🛡️ 3D 타워 디펜스
 // =====================================================
-const T = 2, GW = 22, GH = 14, MAXW = 30;      // 타일 크기, 가로·세로 칸 수, 마지막 웨이브
+const T = 2, GW = 22, GH = 14;                 // 타일 크기, 가로·세로 칸 수
+// 난이도 — waves: 마지막 웨이브, hp: 적 체력 배수, count: 적 수 배수, speed: 적 속도 배수
+const DIFFS = {
+  easy:   { name: "이지",   icon: "🌱", waves: 15, hp: 0.7, count: 0.85, speed: 1,    cash: 800, baseHp: 150, coinMul: 0.8, winCoin: 300,  winGem: 2,
+            desc: "처음 하는 사람용. 적이 약하고 돈이 넉넉해요." },
+  normal: { name: "보통",   icon: "⚔️", waves: 20, hp: 1,   count: 1,    speed: 1,    cash: 650, baseHp: 100, coinMul: 1,   winCoin: 600,  winGem: 5,
+            desc: "기본 난이도. 10·20웨이브에 보스가 나와요." },
+  hard:   { name: "하드",   icon: "🔥", waves: 25, hp: 1.45, count: 1.2, speed: 1.05, cash: 600, baseHp: 80,  coinMul: 1.3, winCoin: 1000, winGem: 10,
+            desc: "적이 많고 단단해요. 전략이 필요해요." },
+  cursed: { name: "저주받은", icon: "💀", waves: 35, hp: 2.1, count: 1.35, speed: 1.15, cash: 600, baseHp: 50,  coinMul: 1.8, winCoin: 2500, winGem: 40, firstGem: 30, cursed: true,
+            desc: "이상하게 생긴 저주받은 적들이 몰려와요… 하늘이 붉게 물들어요." },
+};
+const DIFF_ORDER = ["easy", "normal", "hard", "cursed"];
 // 적이 지나가는 길 (칸 좌표) — 왼쪽에서 나와서 오른쪽 아군 기지로 가요
 const WP = [[-2, 2], [5, 2], [5, 10], [11, 10], [11, 3], [17, 3], [17, 11], [23, 11]];
 const $ = id => document.getElementById(id);
 
 // ---------- 저장 ----------
 const SAVE_KEY = "td3d_save_v1";
-let save = { coins: 0, gems: 0, owned: { pistol: true }, best: 0 };
+let save = { coins: 0, gems: 0, owned: { pistol: true }, best: 0, bestBy: {}, clearBy: {} };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = Object.assign(save, s); } catch (e) {}
-save.owned.pistol = true;
+save.owned.pistol = true; save.bestBy = save.bestBy || {}; save.clearBy = save.clearBy || {};
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 
 // ---------- 타워 데이터 ----------
@@ -244,7 +279,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87b5e0);
 scene.fog = new THREE.Fog(0x87b5e0, 110, 220);
 const camera = new THREE.PerspectiveCamera(48, 1, 0.5, 300);
-scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a6a30, 0.75));
+const hemi = new THREE.HemisphereLight(0xdfefff, 0x4a6a30, 0.75); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 0.85);
 sun.position.set(-20, 40, 18);
 sun.castShadow = true;
@@ -334,6 +369,15 @@ for (let k = 0; k < WP.length - 1; k++) {
   }
 })();
 function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// 저주받은 모드에선 하늘이 붉고 어두워져요
+function setCursedLook(on) {
+  scene.background.set(on ? 0x2a0612 : 0x87b5e0); scene.fog.color.set(on ? 0x2a0612 : 0x87b5e0);
+  scene.fog.near = on ? 50 : 110; scene.fog.far = on ? 150 : 220;
+  hemi.color.set(on ? 0xc58cff : 0xdfefff); hemi.groundColor.set(on ? 0x301018 : 0x4a6a30); hemi.intensity = on ? 0.55 : 0.75;
+  sun.color.set(on ? 0xff6a5a : 0xffffff); sun.intensity = on ? 0.7 : 0.85;
+  document.body.classList.toggle("cursed", on);
+}
 
 // 게임 오브젝트는 모두 world 안에 (게임 끝나면 통째로 비워요)
 let world = new THREE.Group(); scene.add(world);
@@ -535,7 +579,53 @@ function buildVehicle(L) {
   return { g, turret, wheels, muzzle, gunMz };
 }
 
+// 저주받은 적: 길쭉한 몸, 비뚤어진 창백한 머리, 눈이 여러 개, 팔이 너무 많음
+function makeCursedMesh(type) {
+  const d = EN[type], g = new THREE.Group(), s = new THREE.Group(); s.scale.setScalar(d.scale); g.add(s);
+  const body = new THREE.Group(); s.add(body);
+  const legs = [], stretch = 1.15 + Math.random() * 0.35;
+  for (const x of [-0.12, 0.12]) { const lg = new THREE.Group(); lg.position.set(x, 0.75, 0); body.add(lg); box(0.12, 0.78, 0.12, 0x0a0a0a, 0, -0.38, 0, lg); box(0.16, 0.06, 0.34, 0x0a0a0a, 0, -0.76, 0.1, lg); legs.push(lg); }
+  const bc = { grunt: 0x1a0a22, runner: 0x2a1405, brute: 0x3a0505, shocker: 0x14052e, armored: 0x111418, boss: 0x050005 }[type];
+  const torso = box(0.46, 0.75 * stretch, 0.3, bc, 0, 0.75 + 0.38 * stretch, 0, body);
+  // 갈비뼈
+  for (let k = 0; k < 3; k++) box(0.4, 0.03, 0.02, 0xd6d3c4, 0, 0.95 + k * 0.15, 0.16, body);
+  const topY = 0.75 + 0.75 * stretch;
+  // 목이 길고 머리가 꺾여 있어요
+  cyl(0.05, 0.05, 0.35, 0xcfc8b8, 0, topY + 0.15, 0, body, 6);
+  const head = new THREE.Group(); head.position.set(0, topY + 0.42, 0); body.add(head);
+  const hs = 0.75 + Math.random() * 0.6;
+  const skull = box(0.4 * hs, 0.46 * hs, 0.38 * hs, type === "boss" ? 0xf5f5f0 : 0xe8e2d0, 0, 0, 0, head);
+  // 입 (크게 찢어진)
+  box(0.3 * hs, 0.08 * hs, 0.02, 0x000000, 0, -0.12 * hs, 0.2 * hs, head);
+  for (let k = 0; k < 5; k++) box(0.03, 0.05, 0.02, 0xffffff, (-0.12 + k * 0.06) * hs, -0.1 * hs, 0.205 * hs, head);
+  // 눈 여러 개 (빨강·흰색, 위치가 제멋대로)
+  const nEyes = 3 + Math.floor(Math.random() * 5);
+  for (let k = 0; k < nEyes; k++) {
+    const ec = Math.random() < 0.7 ? 0xff1a1a : 0xffffff, es = 0.04 + Math.random() * 0.06;
+    const e = mk(BOXG, MB(ec), (Math.random() - 0.5) * 0.32 * hs, (0.02 + Math.random() * 0.18) * hs, 0.2 * hs, head); e.scale.set(es, es, 0.02);
+  }
+  if (Math.random() < 0.4) { const e3 = mk(SPHG, MB(0xff1a1a), 0, 0.3 * hs, 0, head); e3.scale.setScalar(0.07); } // 정수리 눈
+  head.rotation.z = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.9);
+  if (Math.random() < 0.25) head.rotation.z = Math.PI; // 거꾸로 달린 머리
+  // 팔이 많아요 (길고 가늘게 축 늘어짐)
+  const arms = [], nArms = type === "boss" ? 8 : 2 + Math.floor(Math.random() * 3) * 2;
+  for (let k = 0; k < nArms; k++) {
+    const side = k % 2 ? 1 : -1, row = Math.floor(k / 2);
+    const a = new THREE.Group(); a.position.set(side * 0.27, topY - 0.08 - row * 0.2, 0); body.add(a);
+    box(0.08, 1.05, 0.08, bc, 0, -0.5, 0, a); box(0.14, 0.04, 0.14, 0xcfc8b8, 0, -1.05, 0.03, a);
+    a.rotation.z = side * (0.2 + row * 0.25); a.rotation.x = -0.2 - Math.random() * 0.5; arms.push(a);
+  }
+  if (type === "shocker") { for (let k = 0; k < 3; k++) { const o = mk(SPHG, MB(0xc084fc), Math.cos(k * 2.1) * 0.5, topY + 0.3, Math.sin(k * 2.1) * 0.5, body); o.scale.setScalar(0.08); arms.push(o); } }
+  if (type === "armored") { box(0.52, 0.5, 0.36, 0x3a3f47, 0, 1.15, 0, body); for (let k = 0; k < 4; k++) { const sp = cyl(0, 0.05, 0.25, 0x777777, -0.18 + k * 0.12, 1.45, -0.18, body, 5); sp.rotation.x = -0.6; } }
+  if (type === "brute") { box(0.7, 0.5, 0.45, bc, 0, 1.25, 0, body); }
+  if (type === "boss") {
+    for (const x of [-0.18, 0.18]) { const h = cyl(0, 0.05, 0.55, 0x111111, x * hs, 0.42 * hs, 0, head, 5); h.rotation.z = x > 0 ? -0.5 : 0.5; }
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.03, 6, 20, Math.PI * 1.5), MB(0xff1a1a)); halo.position.y = 0.55 * hs; halo.rotation.x = HALF; head.add(halo);
+  }
+  return { g, legs, head, body, arms, cursed: true, tilt: head.rotation.z, jerk: Math.random() * 10 };
+}
 function makeEnemyMesh(type) {
+  if (G && G.diff.cursed) return makeCursedMesh(type);
   const d = EN[type], g = new THREE.Group(), s = new THREE.Group(); s.scale.setScalar(d.scale); g.add(s);
   const legs = [];
   for (const x of [-0.14, 0.14]) { const lg = new THREE.Group(); lg.position.set(x, 0.6, 0); s.add(lg); box(0.22, 0.6, 0.24, 0x2a2a2a, 0, -0.3, 0, lg); legs.push(lg); }
@@ -571,22 +661,41 @@ let G = null, enemies = [], towers = [], vehicles = [], rockets = [], fxs = [], 
 let occ = new Map(), mode = "menu", placing = null, selected = null;
 const tmpV = V(0, 0, 0), tmpV2 = V(0, 0, 0);
 
-function newGame() {
+function showDiff() {
+  const g = $("diffGrid"); g.innerHTML = "";
+  for (const k of DIFF_ORDER) {
+    const d = DIFFS[k], b = document.createElement("button"), best = save.bestBy[k] || 0;
+    b.className = "dc d-" + k;
+    const gem = d.winGem + (d.firstGem && !save.clearBy[k] ? " (+첫 클리어 " + d.firstGem + ")" : "");
+    b.innerHTML = `<div class="t">${d.icon} ${d.name}</div><div class="d">${d.desc}</div>
+      <div class="b">🌊 ${d.waves}웨이브 · ❤️ ${d.baseHp}</div>
+      <div class="b">클리어 보상 🪙${d.winCoin} 💎${gem}</div>
+      <div class="b">${save.clearBy[k] ? "✅ 클리어함" : "최고 " + best + " / " + d.waves + " 웨이브"}</div>`;
+    b.onclick = () => { $("diff").classList.add("hidden"); newGame(k); };
+    g.appendChild(b);
+  }
+  $("menu").classList.add("hidden"); $("diff").classList.remove("hidden");
+}
+function newGame(diffKey) {
+  const diff = DIFFS[diffKey];
   scene.remove(world); world = new THREE.Group(); scene.add(world);
   enemies = []; towers = []; vehicles = []; rockets = []; fxs = []; tracers = []; freeTracers = [];
   occ = new Map(); placing = null; selected = null;
-  G = { hp: 100, cash: 650, wave: 0, cleared: 0, waveActive: false, queue: [], spawnT: 0, auto: false, autoT: 0, speed: 1, kills: 0, bossGems: 0, time: 0, over: false, hpMul: 1 };
+  G = { diffKey, diff, maxW: diff.waves, hp: diff.baseHp, cash: diff.cash, wave: 0, cleared: 0, waveActive: false, waveT: 0, paid: 0, queue: [], spawnT: 0, auto: false, autoT: 0, speed: 1, kills: 0, bossGems: 0, time: 0, over: false, hpMul: 1 };
   rangeRing.visible = false; ghost.visible = false; world.add(rangeRing); world.add(ghost);
   mode = "game";
   $("menu").classList.add("hidden"); $("hud").classList.remove("hidden");
   $("speedBtn").textContent = "⏩ 1x"; $("autoBtn").classList.remove("on");
+  setCursedLook(!!diff.cursed);
+  $("maxTxt").textContent = diff.waves; $("diffTxt").textContent = diff.icon + " " + diff.name;
   buildCards(); refreshPanel(); updateHUD(true);
   camYaw = portrait() ? HALF : 0; camPitch = 1.0; camDist = baseDist();
-  showBanner("준비! 타워를 설치하세요", 2);
+  showBanner(diff.cursed ? "💀 저주가 시작된다… 💀" : "준비! 타워를 설치하세요", 2);
 }
 
 function makeWave(w) {
-  const q = [], add = (t, n, gap) => { for (let i = 0; i < n; i++) q.push({ t, gap }); };
+  const c = G.diff.count, sp = 1 / Math.sqrt(c);
+  const q = [], add = (t, n, gap) => { n = Math.round(n * c); for (let i = 0; i < n; i++) q.push({ t, gap: gap * sp }); };
   add("grunt", 4 + w * 2, Math.max(0.35, 1 - w * 0.03));
   if (w >= 3) add("runner", Math.floor(w * 1.2), 0.4);
   if (w >= 5) add("brute", Math.floor((w - 3) / 2), 1.2);
@@ -594,35 +703,47 @@ function makeWave(w) {
   if (w >= 12) add("armored", Math.floor((w - 10) / 1.5), 1);
   // 섞기 (보스는 맨 뒤)
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
-  if (w % 10 === 0) for (let i = 0; i < w / 10; i++) q.push({ t: "boss", gap: 3 });
+  // 10웨이브마다 + 마지막 웨이브에 보스
+  if (w % 10 === 0 || w === G.maxW) { const n = Math.max(1, Math.floor(w / 10)) + (G.diff.cursed && w === G.maxW ? 1 : 0); for (let i = 0; i < n; i++) q.push({ t: "boss", gap: 3 }); }
   return q;
 }
 
+const SKIP_DELAY = 12;   // 웨이브 시작 후 이 시간(초)이 지나야 스킵 가능
+const NEXT_DELAY = 3;    // 적이 다 죽으면 이 시간 뒤 다음 웨이브 자동 시작
+function canSkip() { return G && !G.over && G.waveActive && G.wave < G.maxW && G.waveT >= SKIP_DELAY; }
+// 웨이브 보상 (웨이브 보너스 + 농장 수입)
+function payWave(w, skipped) {
+  const bonus = 60 + w * 12 + (skipped ? 25 : 0); G.cash += bonus;
+  floatText("+$" + bonus + (skipped ? " 스킵 보너스" : " 웨이브 보너스"), window.innerWidth / 2, window.innerHeight * 0.4, "#4ade80");
+  for (const t of towers) if (t.type === "farm") { const inc = t.def.levels[t.lvl].income; G.cash += inc; floatAt("+$" + inc, t.x, 1.5, t.z, "#facc15"); }
+  G.paid = w;
+}
 function startWave() {
-  if (!G || G.over || G.waveActive || G.wave >= MAXW) return;
-  G.wave++; G.waveActive = true; G.queue = makeWave(G.wave); G.spawnT = 0.3;
-  const w = G.wave - 1; G.hpMul = 1 + 0.12 * w + 0.006 * w * w;
-  showBanner(G.wave % 10 === 0 ? "⚠️ 보스 웨이브 " + G.wave + " ⚠️" : "웨이브 " + G.wave, 1.6);
+  if (!G || G.over || G.wave >= G.maxW) return;
+  if (G.waveActive) { if (!canSkip()) return; payWave(G.wave, true); }   // 스킵: 지금 웨이브 보상을 받고 다음 웨이브 바로 시작
+  G.wave++; G.waveActive = true; G.waveT = 0; G.spawnT = Math.min(G.spawnT, 0.3);
+  const w = G.wave - 1; G.hpMul = (1 + 0.12 * w + 0.006 * w * w) * G.diff.hp;
+  const bossMul = Math.pow(Math.max(1, G.wave / 10), 1.6) * G.diff.hp;
+  for (const it of makeWave(G.wave)) { it.mul = it.t === "boss" ? bossMul : G.hpMul; G.queue.push(it); }
+  showBanner(G.wave === G.maxW ? "⚠️ 마지막 웨이브 " + G.wave + " ⚠️" : G.wave % 10 === 0 ? "⚠️ 보스 웨이브 " + G.wave + " ⚠️" : "웨이브 " + G.wave, 1.6);
   updateHUD(true);
 }
 
 function endWave() {
   G.waveActive = false; G.cleared = G.wave;
-  const bonus = 60 + G.wave * 12; G.cash += bonus;
-  floatText("+$" + bonus + " 웨이브 보너스", window.innerWidth / 2, window.innerHeight * 0.4, "#4ade80");
-  for (const t of towers) if (t.type === "farm") { const inc = t.def.levels[t.lvl].income; G.cash += inc; floatAt("+$" + inc, t.x, 1.5, t.z, "#facc15"); }
-  if (G.wave >= MAXW) { endGame(true); return; }
-  G.autoT = 3; updateHUD(true);
+  if (G.paid !== G.wave) payWave(G.wave, false);
+  if (G.wave >= G.maxW) { endGame(true); return; }
+  G.autoT = NEXT_DELAY; updateHUD(true);
 }
 
-function spawnEnemy(type) {
+function spawnEnemy(type, mul) {
   const d = EN[type], m = makeEnemyMesh(type);
-  const hp = d.boss ? d.hp * Math.pow(G.wave / 10, 1.6) : d.hp * G.hpMul;
-  const e = { type, def: d, hp, max: hp, d: 0, speed: d.speed * (0.95 + Math.random() * 0.1), mesh: m.g, legs: m.legs, phase: Math.random() * 6,
+  const hp = d.hp * mul;
+  const e = { type, def: d, hp, max: hp, d: 0, speed: d.speed * G.diff.speed * (0.95 + Math.random() * 0.1), mesh: m.g, legs: m.legs, cm: m.cursed ? m : null, phase: Math.random() * 6,
     abT: d.stun ? d.stun.cd * 0.6 : 0, side: (Math.random() - 0.5) * 0.8, pos: V(0, 0, 0), reward: Math.round(d.reward * (1 + G.wave * 0.03)) };
-  e.bar = makeBar(d.boss ? 2.5 : 0.9 * d.scale, d.boss ? 0xa855f7 : 0xef4444); e.barY = 1.95 * d.scale + 0.2;
+  e.bar = makeBar(d.boss ? 2.5 : 0.9 * d.scale, d.boss ? 0xa855f7 : 0xef4444); e.barY = (m.cursed ? 2.9 : 1.95) * d.scale + 0.2;
   world.add(e.mesh); enemies.push(e);
-  if (d.boss) showBanner("👹 보스 등장!", 1.5);
+  if (d.boss) showBanner(G.diff.cursed ? "💀 저주받은 보스 등장!" : "👹 보스 등장!", 1.5);
 }
 
 function hurt(e, amt, pierceArmor) {
@@ -729,9 +850,11 @@ function update(dt) {
   // 적 소환
   if (G.waveActive) {
     G.spawnT -= dt;
-    if (G.spawnT <= 0 && G.queue.length) { const s = G.queue.shift(); spawnEnemy(s.t); G.spawnT = s.gap; }
+    if (G.spawnT <= 0 && G.queue.length) { const s = G.queue.shift(); spawnEnemy(s.t, s.mul); G.spawnT = s.gap; }
     if (!G.queue.length && !enemies.length) endWave();
-  } else if (G.auto && G.wave < MAXW && !G.over) { G.autoT -= dt; if (G.autoT <= 0) startWave(); }
+    G.waveT += dt;
+    if (G.auto && canSkip()) startWave();   // 오토스킵
+  } else if (G.wave > 0 && G.wave < G.maxW && !G.over) { G.autoT -= dt; if (G.autoT <= 0) startWave(); }   // 적이 다 죽으면 자동으로 다음 웨이브
   if (G.over) return;
 
   // 적
@@ -749,6 +872,7 @@ function update(dt) {
     e.pos.x += -dir.z * e.side; e.pos.z += dir.x * e.side;
     e.mesh.position.copy(e.pos); e.mesh.rotation.y = Math.atan2(dir.x, dir.z);
     if (!blocked) { e.phase += dt * e.speed * 3.2 / e.def.scale; const s = Math.sin(e.phase) * 0.6; e.legs[0].rotation.x = s; e.legs[1].rotation.x = -s; }
+    if (e.cm) cursedAnim(e, dt);
     e.bar.position.set(e.pos.x, e.barY, e.pos.z); setBar(e.bar, e.hp / e.max);
     // 기절 공격
     if (e.def.stun) {
@@ -877,6 +1001,14 @@ function update(dt) {
   enemies = enemies.filter(e => !e.dead);
   vehicles = vehicles.filter(v => !v.dead);
 }
+function cursedAnim(e, dt) {
+  const c = e.cm; c.jerk -= dt;
+  // 가끔 머리를 홱 꺾어요
+  if (c.jerk <= 0) { c.jerk = 0.3 + Math.random() * 1.5; c.head.rotation.z = c.tilt + (Math.random() - 0.5) * 1.6; c.head.rotation.y = (Math.random() - 0.5) * 1.2; }
+  else c.head.rotation.z += (c.tilt - c.head.rotation.z) * Math.min(1, dt * 2);
+  c.body.rotation.z = Math.sin(e.phase * 0.5) * 0.18; c.body.position.y = Math.abs(Math.sin(e.phase)) * 0.12;
+  for (let k = 0; k < c.arms.length; k++) { const a = c.arms[k]; if (a.isGroup) a.rotation.x = -0.3 + Math.sin(e.phase + k * 1.3) * 0.5; }
+}
 function heliAnim(t, dt) {
   const k = G.time * 0.8 + t.i;
   t.heli.position.set(t.x + Math.cos(k) * 1.2, 6 + Math.sin(k * 2) * 0.25, t.z + Math.sin(k) * 1.2);
@@ -904,16 +1036,18 @@ function updateFx(dt) {
 function endGame(win) {
   if (G.over) return;
   G.over = true; G.waveActive = false;
-  const cleared = win ? MAXW : G.cleared;
-  const coins = cleared * 20 + Math.floor(G.kills / 2) + (win ? 600 : 0);
-  const gems = Math.floor(cleared / 5) + G.bossGems + (win ? 15 : 0);
-  save.coins += coins; save.gems += gems; save.best = Math.max(save.best, cleared); writeSave();
-  $("resTitle").textContent = win ? "🏆 승리! 30웨이브 클리어" : "💥 기지가 무너졌어요";
-  $("resBody").innerHTML = `버틴 웨이브: <b>${cleared}</b><br>처치한 적: <b>${G.kills}</b><br>획득: <b style="color:#facc15">🪙 ${coins}</b> &nbsp; <b style="color:#67e8f9">💎 ${gems}</b>`;
+  const D = G.diff, cleared = win ? G.maxW : G.cleared;
+  const first = win && D.firstGem && !save.clearBy[G.diffKey] ? D.firstGem : 0;
+  const coins = Math.round(cleared * 20 * D.coinMul) + Math.floor(G.kills / 2) + (win ? D.winCoin : 0);
+  const gems = Math.floor(cleared / 5) + G.bossGems + (win ? D.winGem : 0) + first;
+  save.coins += coins; save.gems += gems; save.best = Math.max(save.best, cleared);
+  save.bestBy[G.diffKey] = Math.max(save.bestBy[G.diffKey] || 0, cleared); if (win) save.clearBy[G.diffKey] = true; writeSave();
+  $("resTitle").textContent = win ? (D.cursed ? "💀 저주를 깨뜨렸다! 💀" : "🏆 승리! " + D.name + " 클리어") : "💥 기지가 무너졌어요";
+  $("resBody").innerHTML = `난이도: <b>${D.icon} ${D.name}</b><br>버틴 웨이브: <b>${cleared} / ${G.maxW}</b><br>${first ? `<b style="color:#d8b4fe">첫 클리어 보너스 💎${first}!</b><br>` : ""}처치한 적: <b>${G.kills}</b><br>획득: <b style="color:#facc15">🪙 ${coins}</b> &nbsp; <b style="color:#67e8f9">💎 ${gems}</b>`;
   $("result").classList.remove("hidden"); placing = null; selected = null; refreshPanel();
 }
 function toMenu() {
-  mode = "menu"; G = null;
+  mode = "menu"; G = null; setCursedLook(false);
   scene.remove(world); world = new THREE.Group(); scene.add(world);
   enemies = []; towers = []; vehicles = []; rockets = []; fxs = []; tracers = []; freeTracers = [];
   $("result").classList.add("hidden"); $("hud").classList.add("hidden"); $("menu").classList.remove("hidden");
@@ -926,7 +1060,7 @@ function toMenu() {
 function refreshWallet() {
   document.querySelectorAll(".coinTxt").forEach(e => e.textContent = save.coins);
   document.querySelectorAll(".gemTxt").forEach(e => e.textContent = save.gems);
-  $("bestTxt").textContent = save.best;
+  $("bestTxt").textContent = DIFF_ORDER.filter(k => save.clearBy[k]).map(k => DIFFS[k].icon).join(" ") || "-";
 }
 function buildShop() {
   const g = $("shopGrid"); g.innerHTML = "";
@@ -967,8 +1101,12 @@ function updateHUD(force) {
   if (!G) return;
   const now = performance.now(); if (!force && now - lastHud < 120) return; lastHud = now;
   $("hpTxt").textContent = Math.ceil(G.hp); $("cashTxt").textContent = Math.floor(G.cash); $("waveTxt").textContent = G.wave;
-  const wb = $("waveBtn"); wb.disabled = G.waveActive || G.over; wb.style.opacity = wb.disabled ? 0.5 : 1;
-  wb.textContent = G.waveActive ? "⚔️ 진행 중" : (G.auto && G.wave > 0 ? "⏳ 곧 시작" : "▶ 웨이브 시작");
+  const wb = $("waveBtn"), last = G.wave >= G.maxW;
+  if (G.waveActive) {
+    wb.disabled = !canSkip();
+    wb.textContent = last ? "⚔️ 마지막 웨이브" : canSkip() ? "⏭ 스킵 (+$)" : "⏭ 스킵 " + Math.ceil(SKIP_DELAY - G.waveT) + "초";
+  } else { wb.disabled = G.over; wb.textContent = G.wave === 0 ? "▶ 웨이브 시작" : "⏳ 다음 웨이브 " + Math.max(0, Math.ceil(G.autoT)) + "초"; }
+  wb.style.opacity = wb.disabled ? 0.5 : 1;
   document.querySelectorAll(".card").forEach(c => c.classList.toggle("poor", G.cash < DEFS[c.dataset.k].place));
   if (selected) refreshPanel(true);
 }
@@ -997,7 +1135,7 @@ function refreshPanel(soft) {
   $("pLv").textContent = "레벨 " + t.lvl + " / " + (t.def.levels.length - 1) + " · " + t.def.levels[t.lvl].txt;
   $("pStat").innerHTML = statText(t);
   const ub = $("upBtn");
-  if (nx) { $("pNext").textContent = "다음: " + nx.txt; ub.textContent = "⬆ 업그레이드 $" + nx.cost; ub.disabled = G.cash < nx.cost; }
+  if (nx) { $("pNext").textContent = "다음: " + nx.txt; ub.textContent = "⬆ 업그레이드 $" + nx.cost + " (E)"; ub.disabled = G.cash < nx.cost; }
   else { $("pNext").textContent = "최대 레벨!"; ub.textContent = "MAX"; ub.disabled = true; }
   $("sellBtn").textContent = "💰 판매 +$" + Math.floor(t.spent * 0.6);
 }
@@ -1008,13 +1146,14 @@ function showBanner(msg, sec) { const b = $("banner"); b.textContent = msg; b.st
 function floatText(msg, x, y, color) { const d = document.createElement("div"); d.className = "ft"; d.textContent = msg; d.style.left = x + "px"; d.style.top = y + "px"; d.style.color = color; document.body.appendChild(d); setTimeout(() => d.remove(), 1200); }
 function floatAt(msg, x, y, z, color) { tmpV2.set(x, y, z).project(camera); if (tmpV2.z > 1) return; floatText(msg, (tmpV2.x + 1) / 2 * innerWidth, (1 - tmpV2.y) / 2 * innerHeight, color); }
 
-$("playBtn").onclick = newGame;
+$("playBtn").onclick = showDiff;
+$("diffBack").onclick = () => { $("diff").classList.add("hidden"); $("menu").classList.remove("hidden"); };
 $("shopBtn").onclick = () => { buildShop(); refreshWallet(); $("menu").classList.add("hidden"); $("shop").classList.remove("hidden"); };
 $("shopBack").onclick = () => { $("shop").classList.add("hidden"); $("menu").classList.remove("hidden"); refreshWallet(); };
 $("resBtn").onclick = toMenu;
 $("waveBtn").onclick = startWave;
 $("speedBtn").onclick = () => { if (!G) return; G.speed = G.speed === 1 ? 2 : G.speed === 2 ? 3 : 1; $("speedBtn").textContent = "⏩ " + G.speed + "x"; };
-$("autoBtn").onclick = () => { if (!G) return; G.auto = !G.auto; G.autoT = 2; $("autoBtn").classList.toggle("on", G.auto); updateHUD(true); };
+$("autoBtn").onclick = () => { if (!G) return; G.auto = !G.auto; toast(G.auto ? "오토스킵 켜짐: 스킵할 수 있게 되면 바로 다음 웨이브!" : "오토스킵 꺼짐"); $("autoBtn").classList.toggle("on", G.auto); updateHUD(true); };
 $("quitBtn").onclick = () => { if (G && !G.over && confirm("포기하고 지금까지 버틴 웨이브만큼 보상을 받을까요?")) endGame(false); };
 $("upBtn").onclick = () => selected && upgradeTower(selected);
 $("sellBtn").onclick = () => selected && sellTower(selected);
@@ -1090,7 +1229,7 @@ addEventListener("keydown", e => {
   if (e.key === "Escape") { if (placing) selectCard(placing); selected = null; refreshPanel(); rangeRing.visible = false; }
   if (e.key === " ") { e.preventDefault(); startWave(); }
   const n = parseInt(e.key); if (n >= 1 && n <= 8) selectCard(ORDER[n - 1]);
-  if ((e.key === "u" || e.key === "U") && selected) upgradeTower(selected);
+  if ((e.key === "e" || e.key === "E" || e.key === "ㄷ") && selected) upgradeTower(selected);
 });
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); if (mode === "menu") camDist = baseDist(); }
 addEventListener("resize", resize); resize();
