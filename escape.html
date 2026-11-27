@@ -3,27 +3,32 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>어둠의 장원 탈출</title>
+<title>어둠의 장원 탈출 3D</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#050608;overflow:hidden;color:#eee;
     font-family:'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;
     touch-action:none;user-select:none;-webkit-user-select:none}
   canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:2}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(circle at 50% 35%,#3a0d0d 0%,#0b0507 55%,#030304 100%);
+    background:radial-gradient(circle at 50% 35%,rgba(58,13,13,.92) 0%,rgba(11,5,7,.95) 55%,#030304 100%);
     z-index:10;padding:16px;box-sizing:border-box;overflow:auto}
   .hidden{display:none!important}
-  .panel{max-width:560px;width:100%;text-align:center}
+  .panel{max-width:580px;width:100%;text-align:center}
   h1{font-size:2.3rem;margin:8px 0 4px;color:#ff5a4a;text-shadow:0 0 18px #a00,0 0 4px #000;letter-spacing:2px}
+  .tag{display:inline-block;font-size:.8rem;letter-spacing:3px;color:#ffb0a0;border:1px solid #7a2a2a;border-radius:6px;padding:2px 8px;margin-bottom:6px}
   .sub{color:#d9b8b0;margin:0 0 18px}
   .rules{text-align:left;background:rgba(0,0,0,.45);border:1px solid #4a1d1d;border-radius:12px;
-    padding:12px 16px;line-height:1.65;font-size:.95rem;color:#ddd}
+    padding:12px 16px;line-height:1.7;font-size:.95rem;color:#ddd}
   .rules b{color:#ffcf6b}
+  .rules .k{display:inline-block;min-width:18px;padding:0 6px;border:1px solid #777;border-radius:5px;background:#222;
+    font-size:.85rem;color:#fff;text-align:center;line-height:1.5}
   .row{display:flex;gap:8px;justify-content:center;margin:16px 0 10px;flex-wrap:wrap}
-  .diff{padding:10px 16px;border-radius:10px;border:2px solid #5a2a2a;background:#1a0c0c;color:#eee;
+  .diff{padding:10px 18px;border-radius:10px;border:2px solid #5a2a2a;background:#1a0c0c;color:#eee;
     font-size:1rem;cursor:pointer;font-family:inherit}
   .diff.on{border-color:#ff5a4a;background:#4a1212;box-shadow:0 0 12px #a00}
-  .btn{display:inline-block;margin:6px;padding:14px 30px;font-size:1.2rem;font-weight:bold;color:#fff;
+  .btn{display:inline-block;margin:6px;padding:14px 30px;font-size:1.15rem;font-weight:bold;color:#fff;
     background:#b91c1c;border:none;border-radius:12px;cursor:pointer;text-decoration:none;font-family:inherit;
     box-shadow:0 4px 0 #6b0f0f}
   .btn.gray{background:#374151;box-shadow:0 4px 0 #1f2937}
@@ -34,62 +39,65 @@
     background:rgba(255,255,255,.06);transform:translate(-50%,-50%);display:none}
   #knob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;
     background:rgba(255,255,255,.3)}
-  #tbtns{position:absolute;right:10px;bottom:14px;display:grid;grid-template-columns:repeat(3,64px);gap:8px;
+  #tbtns{position:absolute;right:10px;bottom:14px;display:grid;grid-template-columns:repeat(3,62px);gap:8px;
     pointer-events:auto}
-  .tb{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.3);background:rgba(20,20,25,.55);
-    color:#fff;font-size:1.3rem;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  .tb{width:62px;height:62px;border-radius:50%;border:2px solid rgba(255,255,255,.3);background:rgba(20,20,25,.55);
+    color:#fff;font-size:.8rem;font-weight:bold;display:flex;align-items:center;justify-content:center;
     font-family:inherit;padding:0;touch-action:none}
-  .tb small{font-size:.58rem;margin-top:1px}
   .tb.big{background:rgba(185,28,28,.6)}
   .tb.on{background:rgba(250,200,80,.55)}
-  #pauseBtn{position:fixed;right:10px;top:10px;z-index:6;width:40px;height:40px;border-radius:10px;
-    border:1px solid #555;background:rgba(0,0,0,.5);color:#fff;font-size:1.1rem}
+  #pauseBtn{position:fixed;right:10px;top:10px;z-index:6;width:44px;height:40px;border-radius:10px;
+    border:1px solid #555;background:rgba(0,0,0,.5);color:#fff;font-size:.8rem;font-family:inherit}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="hud"></canvas>
 
 <div id="touch" class="hidden">
   <div id="stick"><div id="knob"></div></div>
   <div id="tbtns">
-    <button class="tb toggle" data-k="crouch">🫥<small>숙이기</small></button>
-    <button class="tb" data-k="heal">➕<small>치료</small></button>
-    <button class="tb" data-k="interact">🔧<small>수리/열기</small></button>
-    <button class="tb toggle" data-k="run">🏃<small>달리기</small></button>
+    <button class="tb toggle" data-k="crouch">숙이기</button>
+    <button class="tb" data-k="heal">치료</button>
+    <button class="tb" data-k="interact">수리<br>열기</button>
+    <button class="tb toggle" data-k="run">달리기</button>
     <span></span>
-    <button class="tb big" data-k="action">⚡<small>액션</small></button>
+    <button class="tb big" data-k="action">액션</button>
   </div>
 </div>
-<button id="pauseBtn" class="hidden">⏸</button>
+<button id="pauseBtn" class="hidden">정지</button>
 
 <div id="menu" class="overlay">
   <div class="panel">
-    <h1>🌑 어둠의 장원 탈출</h1>
+    <div class="tag">3D HORROR</div>
+    <h1>어둠의 장원 탈출</h1>
     <p class="sub">사냥꾼이 돌아다니는 장원에 갇혔다.<br>발전기를 고치고 출구를 열어 살아서 나가라!</p>
     <div class="rules">
-      <b>이동</b> WASD / 방향키 · <b>Shift</b> 달리기 (긁힌 자국이 남아요) · <b>C</b> 숙이기 (들키기 어려워요)<br>
-      <b>E 꾹</b> 발전기 수리 · 출구 스위치 열기<br>
-      <b>Space</b> 스킬 체크 · 판자 내리기 (사냥꾼 기절!) · 내린 판자 넘기 · 붙잡혔을 때 몸부림 (연타)<br>
-      <b>Q 꾹</b> 스스로 치료 · 쓰러졌을 때 일어나기 · <b>Esc</b> 일시정지<br>
-      💓 <b>심장 소리</b>가 빨라지면 사냥꾼이 가까이 있어요.<br>
-      ⚙️ 스킬 체크를 놓치면 <b>펑!</b> 소리가 나서 사냥꾼이 달려와요.<br>
-      ⛓️ 쓰러지면 사냥꾼이 우리에 가둬요. <b>세 번 갇히면 끝!</b>
+      <b>이동</b> <span class="k">W</span><span class="k">A</span><span class="k">S</span><span class="k">D</span> · <b>시점</b> 마우스 (화면을 클릭하면 마우스가 고정돼요)<br>
+      <span class="k">Shift</span> 달리기 (긁힌 자국이 남아요) · <span class="k">C</span> 숙이기 (들키기 어려워요)<br>
+      <span class="k">E</span> 꾹: 발전기 수리 · 출구 스위치 열기<br>
+      <span class="k">Space</span> 스킬 체크 · 판자 내리기 (사냥꾼 기절) · 내린 판자 넘기 · 붙잡혔을 때 몸부림 (연타)<br>
+      <span class="k">Q</span> 꾹: 스스로 치료 · 쓰러졌을 때 일어나기 · <span class="k">Esc</span> 일시정지<br>
+      <b>심장 소리</b>가 빨라지면 사냥꾼이 가까이 있어요.<br>
+      스킬 체크를 놓치면 <b>펑!</b> 소리가 나서 사냥꾼이 달려와요.<br>
+      쓰러지면 사냥꾼이 우리에 가둬요. <b>세 번 갇히면 끝!</b><br>
+      휴대폰: 왼쪽을 끌어서 이동, 오른쪽을 끌어서 시점 회전
     </div>
     <div class="row">
-      <button class="diff" data-d="easy">😌 쉬움</button>
-      <button class="diff on" data-d="normal">😨 보통</button>
-      <button class="diff" data-d="hard">💀 어려움</button>
+      <button class="diff" data-d="easy">쉬움</button>
+      <button class="diff on" data-d="normal">보통</button>
+      <button class="diff" data-d="hard">어려움</button>
     </div>
-    <button class="btn" id="startBtn">▶ 게임 시작</button><br>
-    <a class="btn gray" href="index.html">🏠 메인으로</a>
+    <button class="btn" id="startBtn">게임 시작</button><br>
+    <a class="btn gray" href="index.html">메인으로</a>
   </div>
 </div>
 
 <div id="pause" class="overlay hidden">
   <div class="panel">
-    <h1>⏸ 일시정지</h1>
-    <button class="btn" id="resumeBtn">▶ 계속하기</button><br>
-    <button class="btn gray" id="quitBtn">🏳️ 처음으로</button>
+    <h1>일시정지</h1>
+    <button class="btn" id="resumeBtn">계속하기</button><br>
+    <button class="btn gray" id="quitBtn">처음으로</button>
   </div>
 </div>
 
@@ -98,18 +106,19 @@
     <h1 id="overTitle">탈출 성공!</h1>
     <p class="sub" id="overSub"></p>
     <div class="stats" id="overStats"></div><br>
-    <button class="btn" id="retryBtn">🔁 다시 하기</button>
-    <button class="btn gray" id="menuBtn">📜 난이도 선택</button><br>
-    <a class="btn gray" href="index.html">🏠 메인으로</a>
+    <button class="btn" id="retryBtn">다시 하기</button>
+    <button class="btn gray" id="menuBtn">난이도 선택</button><br>
+    <a class="btn gray" href="index.html">메인으로</a>
   </div>
 </div>
 
 <script>
 // =====================================================
-// 🌑 어둠의 장원 탈출
+// 어둠의 장원 탈출 3D
 //  생존자(나) vs 사냥꾼(컴퓨터) 비대칭 호러 게임
 //  · 발전기를 고치면 출구에 전원이 들어오고, 스위치를 열면 탈출!
 //  · 사냥꾼에게 두 번 맞으면 쓰러지고, 우리에 세 번 갇히면 끝.
+//  · 게임 규칙은 2D 격자 위에서 계산하고, three.js로 3D로 그려요.
 // =====================================================
 
 // ---------- 지도 상수 ----------
@@ -189,7 +198,6 @@ let diffKey = 'normal', D = DIFFS.normal;
 let grid, gens, pallets, gates, cages, player, killer, marks, bloods, msgs, pops, sc, stats;
 let gameState = 'menu', gatesPowered = false, timeT = 0, shake = 0, camX = 0, camY = 0;
 let hbT = 0, hbPulse = 0, actionQueued = false;
-const motes = [];
 
 const rnd = n => Math.floor(Math.random() * n);
 const idx = (x, y) => y * W + x;
@@ -437,12 +445,15 @@ addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (gameState === 'play') togglePause(); });
 
 function readInput() {
-  let mx = 0, my = 0;
-  if (keys.KeyA || keys.ArrowLeft) mx -= 1;
-  if (keys.KeyD || keys.ArrowRight) mx += 1;
-  if (keys.KeyW || keys.ArrowUp) my -= 1;
-  if (keys.KeyS || keys.ArrowDown) my += 1;
-  mx += touch.mx; my += touch.my;
+  // 카메라가 보는 방향을 기준으로 앞/뒤/옆 이동
+  let f = 0, s = 0;
+  if (keys.KeyW || keys.ArrowUp) f += 1;
+  if (keys.KeyS || keys.ArrowDown) f -= 1;
+  if (keys.KeyD || keys.ArrowRight) s += 1;
+  if (keys.KeyA || keys.ArrowLeft) s -= 1;
+  f -= touch.my; s += touch.mx;
+  const fx = Math.cos(camYaw), fz = Math.sin(camYaw);
+  let mx = fx * f - fz * s, my = fz * f + fx * s;
   const l = Math.hypot(mx, my); if (l > 1) { mx /= l; my /= l; }
   inp.mx = mx; inp.my = my;
   inp.run = !!(keys.ShiftLeft || keys.ShiftRight || touch.run);
@@ -480,6 +491,8 @@ function newGame() {
   stats = { gens: 0, great: 0, good: 0, fail: 0, stuns: 0, hits: 0, caged: 0, wiggles: 0 };
   gatesPowered = false; timeT = 0; shake = 0; hbT = 0;
   camX = player.x; camY = player.y;
+  camYaw = Math.atan2(H / 2 - player.y, W / 2 - player.x); camPitch = 0.38; pVisDir = 0; camSnap = true;
+  build3D();
   pickPatrol();
   msg(`발전기 ${D.gens}개를 고쳐서 출구에 전원을 넣어라!`, '#ffd76b');
   gameState = 'play';
@@ -614,7 +627,7 @@ function dropPallet(pl) {
   if (dist(k.x, k.y, cx, cy) < 1.4 && !k.carrying && k.stun <= 0) {
     k.stun = D.stun; k.atk = null; k.busy = 0; k.after = null;
     stats.stuns++; sfx.stun();
-    msg('💥 판자로 사냥꾼을 기절시켰다!', '#8f8');
+    msg('판자로 사냥꾼을 기절시켰다!', '#8f8');
   }
   pushOut(k, cx, cy);
   noiseAt(cx, cy, 10);
@@ -640,21 +653,21 @@ function completeGen(g) {
   g.done = true; g.prog = 100; g.regress = false; stats.gens++;
   sc = null; sfx.genDone();
   const left = Math.max(0, D.gens - gensDone());
-  if (left > 0) msg(`⚙️ 발전기 가동! 앞으로 ${left}개 남았다`, '#ffd76b');
+  if (left > 0) msg(`발전기 가동! 앞으로 ${left}개 남았다`, '#ffd76b');
   killerHear(g.x + .5, g.y + .5, true);
   if (left === 0) powerGates();
 }
 
 function powerGates() {
   gatesPowered = true; sfx.power();
-  msg('🚪 출구에 전원이 들어왔다! 초록 스위치를 찾아 열어라!', '#7f7');
+  msg('출구에 전원이 들어왔다! 초록 스위치를 찾아 열어라!', '#7f7');
 }
 
 function openGate(g) {
   g.open = true; g.prog = 100; sc = null;
   g.tiles.forEach(([x, y]) => grid[idx(x, y)] = FLOOR);
   sfx.power();
-  msg('🚪 출구가 열렸다! 밖으로 달려라!', '#7f7');
+  msg('출구가 열렸다! 밖으로 달려라!', '#7f7');
 }
 
 function hitPlayer() {
@@ -667,7 +680,7 @@ function hitPlayer() {
     msg('쓰러졌다! [Q 꾹] 일어나기 · 잡히면 Space 연타!', '#f66');
   } else {
     p.state = 'free'; p.boost = 1.8;
-    msg('🩸 공격당했다! 다음에 맞으면 쓰러진다', '#fa5');
+    msg('공격당했다! 다음에 맞으면 쓰러진다', '#fa5');
   }
 }
 
@@ -849,7 +862,7 @@ function hangPlayer() {
   if (p.cageCount >= 3) { p.x = c.x + .5; p.y = c.y + .5; endGame(false, '세 번째로 우리에 갇혔다...'); return; }
   p.state = 'caged'; p.x = c.x + .5; p.y = c.y + .5;
   p.cageTime = p.cageCount === 1 ? 50 : 32; p.cageProg = 0; p.nextCheck = 1.2; p.health = 0;
-  msg(`⛓️ 우리에 갇혔다! (${p.cageCount}/3) 스킬 체크로 우리를 부숴라!`, '#f66');
+  msg(`우리에 갇혔다! (${p.cageCount}/3) 스킬 체크로 우리를 부숴라!`, '#f66');
   pickPatrol(c);
 }
 
@@ -1017,280 +1030,489 @@ function update(dt) {
   updateWorld(dt);
 }
 
-// ---------- 그리기 ----------
-const cvs = document.getElementById('c'), ctx = cvs.getContext('2d');
-const dark = document.createElement('canvas'), dctx = dark.getContext('2d');
-let cw, ch, S, dpr;
+// ---------- 3D 그리기 ----------
+const cvs = document.getElementById('c');
+const hud = document.getElementById('hud'), ctx = hud.getContext('2d');
+let cw, ch, dpr, frameDt = 0.016;
+let camYaw = 0, camPitch = 0.38;
+const WH = 1.9;           // 벽 높이
+const FOGC = 0x05060b;
+
+const renderer = new THREE.WebGLRenderer({ canvas: cvs, antialias: true });
+renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(FOGC);
+scene.fog = new THREE.FogExp2(FOGC, 0.115);
+const camera = new THREE.PerspectiveCamera(68, 1, 0.05, 80);
+
+scene.add(new THREE.HemisphereLight(0x52617d, 0x15130d, 0.5));
+const moon = new THREE.DirectionalLight(0x8494c8, 0.35);
+moon.position.set(-20, 30, 10); scene.add(moon);
+const lamp = new THREE.PointLight(0xffd9a8, 1.6, 9.5, 1.5); scene.add(lamp);
+const redLight = new THREE.PointLight(0xff2a10, 1.6, 4.5, 2); scene.add(redLight);
+
 function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
   cw = innerWidth; ch = innerHeight;
-  for (const c of [cvs, dark]) { c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
-  cvs.style.width = cw + 'px'; cvs.style.height = ch + 'px';
-  S = Math.min(cw, ch) / 19;
+  renderer.setSize(cw, ch);
+  camera.aspect = cw / ch; camera.updateProjectionMatrix();
+  hud.width = Math.round(cw * dpr); hud.height = Math.round(ch * dpr);
+  hud.style.width = cw + 'px'; hud.style.height = ch + 'px';
 }
 addEventListener('resize', resize); resize();
-for (let i = 0; i < 40; i++) motes.push({ x: Math.random(), y: Math.random(), s: Math.random() * 2 + 1, v: Math.random() * 0.01 + 0.004 });
 
-let viewX = 0, viewY = 0;
-const SX = x => (x - viewX) * S + cw / 2;
-const SY = y => (y - viewY) * S + ch / 2;
-
-const FLOORS = ['#1a201b', '#1c231d', '#171d19', '#1e2520'];
-
-function drawTiles() {
-  const x0 = Math.max(0, Math.floor(viewX - cw / 2 / S) - 1), x1 = Math.min(W - 1, Math.ceil(viewX + cw / 2 / S) + 1);
-  const y0 = Math.max(0, Math.floor(viewY - ch / 2 / S) - 1), y1 = Math.min(H - 1, Math.ceil(viewY + ch / 2 / S) + 1);
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const sx = SX(x), sy = SY(y), h = hash(x, y), t = grid[idx(x, y)];
-    ctx.fillStyle = FLOORS[h % 4];
-    ctx.fillRect(sx, sy, S + 1, S + 1);
-    if (t === FLOOR && h % 9 === 0) {
-      ctx.strokeStyle = '#2a3a2b'; ctx.lineWidth = 1.2; ctx.beginPath();
-      const gx = sx + (h % 7) / 7 * S * .7 + S * .15, gy = sy + ((h >> 4) % 7) / 7 * S * .7 + S * .2;
-      ctx.moveTo(gx, gy); ctx.lineTo(gx - 2, gy - 6); ctx.moveTo(gx, gy); ctx.lineTo(gx + 3, gy - 5); ctx.stroke();
+// ----- 무늬 (캔버스로 직접 그린 텍스처) -----
+function canvasTex(size, draw) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return t;
+}
+const floorTex = canvasTex(256, (g, n) => {
+  g.fillStyle = '#28321f'; g.fillRect(0, 0, n, n);
+  for (let i = 0; i < 12; i++) {
+    g.fillStyle = 'rgba(45,35,22,.35)'; g.beginPath();
+    g.arc(Math.random() * n, Math.random() * n, 12 + Math.random() * 28, 0, 7); g.fill();
+  }
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = Math.random() < .5 ? 'rgba(14,18,10,.5)' : 'rgba(75,88,52,.35)';
+    g.fillRect(Math.random() * n, Math.random() * n, 2 + Math.random() * 3, 2 + Math.random() * 3);
+  }
+  g.strokeStyle = 'rgba(80,105,55,.65)'; g.lineWidth = 1.5;
+  for (let i = 0; i < 200; i++) {
+    const x = Math.random() * n, y = Math.random() * n;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - .5) * 6, y - 4 - Math.random() * 7); g.stroke();
+  }
+});
+floorTex.repeat.set((W + 60) / 3, (H + 60) / 3);
+const wallTex = canvasTex(128, (g, n) => {
+  g.fillStyle = '#2a2c31'; g.fillRect(0, 0, n, n);
+  const rows = 5;
+  for (let r = 0; r < rows; r++) {
+    const y = r * n / rows, off = r % 2 ? n / 4 : 0;
+    for (let c = -1; c < 3; c++) {
+      g.fillStyle = `hsl(220,6%,${32 + Math.random() * 14}%)`;
+      g.fillRect(c * n / 2 + off + 2, y + 2, n / 2 - 4, n / rows - 4);
     }
   }
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const t = grid[idx(x, y)], sx = SX(x), sy = SY(y);
-    if (t === WALL) {
-      const h = hash(x, y);
-      ctx.fillStyle = '#16181c'; ctx.fillRect(sx, sy + S * .72, S + 1, S * .28 + 1);
-      ctx.fillStyle = h % 3 ? '#353a43' : '#3a3f48'; ctx.fillRect(sx, sy - S * .12, S + 1, S * .84);
-      ctx.fillStyle = 'rgba(255,255,255,.05)'; ctx.fillRect(sx, sy - S * .12, S + 1, S * .1);
-      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1;
-      ctx.strokeRect(sx + .5, sy - S * .12 + .5, S, S * .84);
-    } else if (t === GATE) {
-      drawGateTile(x, y, sx, sy);
-    } else if (t === PALLET) {
-      ctx.save(); ctx.translate(sx + S / 2, sy + S / 2);
-      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(-S * .38, S * .08, S * .76, S * .14);
-      ctx.fillStyle = '#7a4f28'; ctx.fillRect(-S * .38, -S * .32, S * .76, S * .42);
-      ctx.strokeStyle = '#4a2d14'; ctx.lineWidth = 2; ctx.strokeRect(-S * .38, -S * .32, S * .76, S * .42);
-      ctx.beginPath(); ctx.moveTo(-S * .38, -S * .18); ctx.lineTo(S * .38, -S * .18); ctx.moveTo(-S * .38, -S * .04); ctx.lineTo(S * .38, -S * .04); ctx.stroke();
-      ctx.restore();
-    } else if (t === DROP) {
-      ctx.fillStyle = '#6b4322'; ctx.fillRect(sx + S * .04, sy + S * .1, S * .92, S * .8);
-      ctx.strokeStyle = '#3e2410'; ctx.lineWidth = 2;
-      for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(sx + S * .04, sy + S * (.1 + i * .2)); ctx.lineTo(sx + S * .96, sy + S * (.1 + i * .2)); ctx.stroke(); }
-      ctx.strokeRect(sx + S * .04, sy + S * .1, S * .92, S * .8);
-    }
+  for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * .3})`; g.fillRect(Math.random() * n, Math.random() * n, 2, 2); }
+  for (let i = 0; i < 9; i++) {
+    g.fillStyle = 'rgba(45,75,32,.4)'; g.beginPath();
+    g.arc(Math.random() * n, n - Math.random() * 25, 6 + Math.random() * 12, 0, 7); g.fill();
   }
-  // 부서진 판자 조각
-  for (const pl of pallets) if (pl.state === 'broken') {
-    const sx = SX(pl.x), sy = SY(pl.y);
-    ctx.fillStyle = '#4a311a';
-    ctx.fillRect(sx + S * .1, sy + S * .6, S * .3, S * .08); ctx.fillRect(sx + S * .55, sy + S * .3, S * .28, S * .08);
-  }
-  // 출구 스위치 & 열린 문
-  for (const g of gates) {
-    const sx = SX(g.sw.x), sy = SY(g.sw.y);
-    ctx.fillStyle = '#555'; ctx.fillRect(sx + S * .2, sy + S * .15, S * .6, S * .6);
-    ctx.fillStyle = g.open ? '#4f4' : gatesPowered ? (Math.sin(timeT * 6) > 0 ? '#4f4' : '#1a5a1a') : '#a22';
-    ctx.beginPath(); ctx.arc(sx + S * .5, sy + S * .45, S * .14, 0, 7); ctx.fill();
-    if (g.open) for (const [x, y] of g.tiles) {
-      const tx = SX(x), ty = SY(y);
-      ctx.fillStyle = `rgba(120,255,140,${.25 + .15 * Math.sin(timeT * 4)})`;
-      ctx.fillRect(tx, ty, S, S);
-    }
-  }
+});
+const woodTex = canvasTex(64, (g, n) => {
+  g.fillStyle = '#7a4f28'; g.fillRect(0, 0, n, n);
+  g.strokeStyle = '#3e2410'; g.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(0, i * n / 4); g.lineTo(n, i * n / 4); g.stroke(); }
+  g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 1;
+  for (let i = 0; i < 24; i++) { const y = Math.random() * n; g.beginPath(); g.moveTo(0, y); g.lineTo(n, y + Math.random() * 4 - 2); g.stroke(); }
+});
+const glowTex = canvasTex(64, (g, n) => {
+  const gr = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.35, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, n, n);
+});
+
+const MAT = {
+  floor: new THREE.MeshLambertMaterial({ map: floorTex }),
+  wall: new THREE.MeshLambertMaterial({ map: wallTex }),
+  wood: new THREE.MeshLambertMaterial({ map: woodTex }),
+  metal: new THREE.MeshLambertMaterial({ color: 0x60646c }),
+  darkMetal: new THREE.MeshLambertMaterial({ color: 0x2a2d33 }),
+  rust: new THREE.MeshLambertMaterial({ color: 0x5a3f2a }),
+  gen: new THREE.MeshLambertMaterial({ color: 0x525a40 }),
+  genDark: new THREE.MeshLambertMaterial({ color: 0x272b21 }),
+  robe: new THREE.MeshLambertMaterial({ color: 0x150b0c }),
+  robe2: new THREE.MeshLambertMaterial({ color: 0x24110f }),
+  mask: new THREE.MeshLambertMaterial({ color: 0xb9ae98 }),
+  skin: new THREE.MeshLambertMaterial({ color: 0xe8c2a0 }),
+  hair: new THREE.MeshLambertMaterial({ color: 0x3a2618 }),
+  pants: new THREE.MeshLambertMaterial({ color: 0x2b3448 }),
+  shoe: new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
+  bag: new THREE.MeshLambertMaterial({ color: 0x5a4430 }),
+  eye: new THREE.MeshBasicMaterial({ color: 0xff2a1a }),
+  black: new THREE.MeshBasicMaterial({ color: 0x111111 }),
+  blade: new THREE.MeshLambertMaterial({ color: 0xb8bcc4 }),
+  handle: new THREE.MeshLambertMaterial({ color: 0x4a3622 }),
+  mark: new THREE.MeshBasicMaterial({ color: 0xd8521e, transparent: true, opacity: .75, depthWrite: false }),
+  blood: new THREE.MeshBasicMaterial({ color: 0x6a0606, transparent: true, opacity: .85, depthWrite: false }),
+};
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const SPHERE = new THREE.SphereGeometry(1, 14, 10);
+
+function box(w, h, d, mat, x, y, z, parent) {
+  const m = new THREE.Mesh(BOX, mat); m.scale.set(w, h, d); m.position.set(x, y, z); parent.add(m); return m;
+}
+function ball(r, mat, x, y, z, parent) {
+  const m = new THREE.Mesh(SPHERE, mat); m.scale.setScalar(r); m.position.set(x, y, z); parent.add(m); return m;
+}
+function cyl(r, h, mat, x, y, z, parent, seg = 8) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat); m.position.set(x, y, z); parent.add(m); return m;
 }
 
-function drawGateTile(x, y, sx, sy) {
-  const g = gates.find(q => q.tiles.some(([a, b]) => a === x && b === y));
-  ctx.fillStyle = '#2b1414'; ctx.fillRect(sx, sy - S * .12, S + 1, S * .84);
-  ctx.strokeStyle = '#6b6f77'; ctx.lineWidth = Math.max(2, S * .07);
-  const open = g ? g.prog / 100 : 0;
-  for (let i = 1; i < 4; i++) {
-    const bx = sx + S * i / 4;
-    ctx.beginPath(); ctx.moveTo(bx, sy - S * .1); ctx.lineTo(bx, sy + S * .7 - open * S * .7); ctx.stroke();
-  }
-  ctx.fillStyle = gatesPowered ? '#3c3' : '#822';
-  ctx.fillRect(sx + S * .1, sy - S * .1, S * .8, S * .08);
+// 바닥 (지도 바깥까지 넓게)
+const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(W + 60, H + 60), MAT.floor);
+floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(W / 2, 0, H / 2);
+scene.add(floorMesh);
+
+// ----- 생존자 모형 (앞쪽이 +x) -----
+const P3 = new THREE.Group(); scene.add(P3);
+const pBody = new THREE.Group(); P3.add(pBody);
+const pMat = new THREE.MeshLambertMaterial({ color: 0x3fa3e0 });
+const pParts = {};
+{
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.19, .3, 4, 10), pMat); torso.position.y = .7; pBody.add(torso);
+  ball(.15, MAT.skin, 0, 1.08, 0, pBody);
+  const hair = ball(.158, MAT.hair, -.03, 1.12, 0, pBody); hair.scale.set(.15, .13, .16);
+  ball(.025, MAT.black, .135, 1.1, .055, pBody); ball(.025, MAT.black, .135, 1.1, -.055, pBody);
+  box(.12, .26, .26, MAT.bag, -.21, .74, 0, pBody);
+  pParts.legs = [-1, 1].map(s => {
+    const g = new THREE.Group(); g.position.set(0, .46, s * .09); pBody.add(g);
+    cyl(.07, .42, MAT.pants, 0, -.21, 0, g); box(.16, .07, .1, MAT.shoe, .03, -.43, 0, g);
+    return g;
+  });
+  pParts.arms = [-1, 1].map(s => {
+    const g = new THREE.Group(); g.position.set(0, .9, s * .25); pBody.add(g);
+    cyl(.05, .4, pMat, 0, -.2, 0, g); ball(.055, MAT.skin, 0, -.42, 0, g);
+    return g;
+  });
 }
 
-function drawGens() {
-  for (const g of gens) {
-    const sx = SX(g.x) + S / 2, sy = SY(g.y) + S / 2;
-    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(sx - S * .42, sy + S * .1, S * .84, S * .3);
-    ctx.fillStyle = g.done ? '#5c6340' : '#4a4f42';
-    ctx.fillRect(sx - S * .4, sy - S * .38, S * .8, S * .7);
-    ctx.fillStyle = '#2e322a'; ctx.fillRect(sx - S * .3, sy - S * .28, S * .6, S * .22);
-    ctx.strokeStyle = '#22251f'; ctx.lineWidth = 2; ctx.strokeRect(sx - S * .4, sy - S * .38, S * .8, S * .7);
-    // 피스톤
-    const pist = g.done ? Math.sin(timeT * 20) * S * .04 : (player.act === 'gen' && player.target === g ? Math.sin(timeT * 9) * S * .03 : 0);
-    ctx.fillStyle = '#777';
-    ctx.fillRect(sx - S * .22, sy - S * .5 + pist, S * .1, S * .16); ctx.fillRect(sx + S * .12, sy - S * .5 - pist, S * .1, S * .16);
-    // 불빛
-    for (let i = 0; i < 4; i++) {
-      const on = g.done || g.prog >= (i + 1) * 25;
-      ctx.fillStyle = on ? '#ffe46b' : '#3a3a2a';
-      ctx.beginPath(); ctx.arc(sx - S * .24 + i * S * .16, sy + S * .14, S * .05, 0, 7); ctx.fill();
-    }
-    if (g.done) {
-      const gr = ctx.createRadialGradient(sx, sy, 0, sx, sy, S * 2.2);
-      gr.addColorStop(0, 'rgba(255,230,120,.25)'); gr.addColorStop(1, 'rgba(255,230,120,0)');
-      ctx.fillStyle = gr; ctx.fillRect(sx - S * 2.2, sy - S * 2.2, S * 4.4, S * 4.4);
-    }
-    if (player.act === 'gen' && player.target === g && Math.random() < .5) {
-      ctx.fillStyle = '#ffd'; ctx.fillRect(sx + (Math.random() - .5) * S * .7, sy + (Math.random() - .5) * S * .6, 2, 2);
-    }
-  }
+// ----- 사냥꾼 모형 -----
+const K3 = new THREE.Group(); scene.add(K3);
+const kBody = new THREE.Group(); K3.add(kBody);
+const kParts = {};
+{
+  const robe = new THREE.Mesh(new THREE.ConeGeometry(.5, 1.5, 10), MAT.robe); robe.position.y = .75; kBody.add(robe);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(.25, .42, 4, 10), MAT.robe2); torso.position.y = 1.28; kBody.add(torso);
+  box(.32, .14, .78, MAT.robe, 0, 1.5, 0, kBody);
+  ball(.22, MAT.robe, 0, 1.72, 0, kBody);
+  const mask = ball(.2, MAT.mask, .09, 1.72, 0, kBody); mask.scale.set(.13, .21, .17);
+  ball(.035, MAT.eye, .215, 1.75, .065, kBody); ball(.035, MAT.eye, .215, 1.75, -.065, kBody);
+  const hood = new THREE.Mesh(new THREE.ConeGeometry(.27, .5, 10), MAT.robe); hood.position.set(-.04, 1.95, 0); hood.rotation.z = .25; kBody.add(hood);
+  // 왼팔
+  const la = new THREE.Group(); la.position.set(0, 1.46, -.36); kBody.add(la);
+  cyl(.07, .6, MAT.robe2, 0, -.3, 0, la); ball(.07, MAT.mask, 0, -.62, 0, la);
+  kParts.leftArm = la;
+  // 오른팔 + 갈고리 낫
+  const ra = new THREE.Group(); ra.position.set(0, 1.46, .36); kBody.add(ra);
+  cyl(.07, .6, MAT.robe2, 0, -.3, 0, ra); ball(.07, MAT.mask, 0, -.62, 0, ra);
+  const w = new THREE.Group(); w.position.set(0, -.62, 0); ra.add(w);
+  const handle = cyl(.03, .95, MAT.handle, .3, 0, 0, w); handle.rotation.z = Math.PI / 2;
+  const bladeMat = MAT.blade.clone();
+  const blade = new THREE.Mesh(new THREE.TorusGeometry(.26, .03, 6, 18, Math.PI * 1.05), bladeMat);
+  blade.position.set(.78, -.18, 0); blade.rotation.z = Math.PI * .5; w.add(blade);
+  kParts.rightArm = ra; kParts.bladeMat = bladeMat;
 }
 
-function drawCages() {
-  for (const c of cages) {
-    const sx = SX(c.x) + S / 2, sy = SY(c.y) + S / 2;
-    ctx.fillStyle = 'rgba(60,0,0,.35)'; ctx.beginPath(); ctx.arc(sx, sy, S * .55, 0, 7); ctx.fill();
-    ctx.strokeStyle = '#5b5f66'; ctx.lineWidth = Math.max(1.5, S * .05);
-    ctx.strokeRect(sx - S * .4, sy - S * .45, S * .8, S * .8);
-    for (let i = 1; i < 5; i++) { ctx.beginPath(); ctx.moveTo(sx - S * .4 + i * S * .16, sy - S * .45); ctx.lineTo(sx - S * .4 + i * S * .16, sy + S * .35); ctx.stroke(); }
-    ctx.fillStyle = '#3a1010';
-    for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(sx - S * .4 + i * S * .2, sy - S * .45); ctx.lineTo(sx - S * .3 + i * S * .2, sy - S * .62); ctx.lineTo(sx - S * .2 + i * S * .2, sy - S * .45); ctx.fill(); }
+// ----- 긁힌 자국 & 핏자국 -----
+const MAXDECAL = 220;
+const markGeo = new THREE.PlaneGeometry(.32, .05); markGeo.rotateX(-Math.PI / 2);
+const bloodGeo = new THREE.CircleGeometry(1, 9); bloodGeo.rotateX(-Math.PI / 2);
+const markIM = new THREE.InstancedMesh(markGeo, MAT.mark, MAXDECAL); markIM.count = 0; scene.add(markIM);
+const bloodIM = new THREE.InstancedMesh(bloodGeo, MAT.blood, MAXDECAL); bloodIM.count = 0; scene.add(bloodIM);
+const dummy = new THREE.Object3D();
+
+// ----- 아이콘 (어둠 속에서도 보이는 표시) -----
+function iconCanvas() { const c = document.createElement('canvas'); c.width = c.height = 64; return c; }
+function drawGenIcon(c, prog, bad) {
+  const g = c.getContext('2d'); g.clearRect(0, 0, 64, 64);
+  const col = bad ? '#ff5050' : '#ffd96b';
+  g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 7; g.beginPath(); g.arc(32, 32, 27, 0, 7); g.stroke();
+  if (prog > 0) {
+    g.strokeStyle = col; g.lineWidth = 5; g.beginPath();
+    g.arc(32, 32, 27, -Math.PI / 2, -Math.PI / 2 + prog / 100 * Math.PI * 2); g.stroke();
   }
+  // 톱니바퀴
+  g.fillStyle = col; g.beginPath();
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2, r = i % 2 ? 13 : 18;
+    const x = 32 + Math.cos(a) * r, y = 32 + Math.sin(a) * r;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath(); g.fill();
+  g.fillStyle = '#1a1a1a'; g.beginPath(); g.arc(32, 32, 6, 0, 7); g.fill();
+}
+function drawGateIcon(c, prog) {
+  const g = c.getContext('2d'); g.clearRect(0, 0, 64, 64);
+  g.strokeStyle = '#7dff8c'; g.lineWidth = 4;
+  g.strokeRect(16, 10, 32, 44);
+  g.fillStyle = 'rgba(125,255,140,.35)'; g.fillRect(18, 12 + 40 * (1 - prog / 100), 28, 40 * prog / 100);
+  g.fillStyle = '#7dff8c';
+  g.beginPath(); g.moveTo(32, 18); g.lineTo(42, 30); g.lineTo(36, 30); g.lineTo(36, 44); g.lineTo(28, 44); g.lineTo(28, 30); g.lineTo(22, 30); g.closePath(); g.fill();
+}
+function drawCageIcon(c) {
+  const g = c.getContext('2d'); g.clearRect(0, 0, 64, 64);
+  g.strokeStyle = '#ff4040'; g.lineWidth = 3;
+  g.strokeRect(14, 16, 36, 38);
+  for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(14 + i * 9, 16); g.lineTo(14 + i * 9, 54); g.stroke(); }
+  g.beginPath(); g.moveTo(32, 4); g.lineTo(32, 16); g.stroke();
+}
+function makeIcon(canvas, x, y, z, size) {
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, fog: false });
+  const s = new THREE.Sprite(mat); s.position.set(x, y, z); s.scale.set(size, size, 1); s.renderOrder = 999;
+  world.add(s);
+  return { s, mat, tex, canvas, key: '' };
 }
 
-function drawMarks() {
-  ctx.lineWidth = Math.max(1.5, S * .05); ctx.lineCap = 'round';
-  for (const m of marks) {
-    const a = Math.max(0, 1 - m.age / 7) * .7;
-    ctx.strokeStyle = `rgba(230,90,40,${a})`;
-    const sx = SX(m.x), sy = SY(m.y), l = S * .18;
-    ctx.beginPath();
-    ctx.moveTo(sx - Math.cos(m.a) * l, sy - Math.sin(m.a) * l); ctx.lineTo(sx + Math.cos(m.a) * l, sy + Math.sin(m.a) * l);
-    ctx.moveTo(sx - Math.cos(m.a) * l + 3, sy - Math.sin(m.a) * l + 3); ctx.lineTo(sx + Math.cos(m.a) * l * .6 + 3, sy + Math.sin(m.a) * l * .6 + 3);
-    ctx.stroke();
-  }
-  for (const b of bloods) {
-    ctx.fillStyle = `rgba(120,0,0,${Math.max(0, 1 - b.age / 12) * .85})`;
-    ctx.beginPath(); ctx.arc(SX(b.x), SY(b.y), S * b.s, 0, 7); ctx.fill();
-  }
+// ----- 지도를 3D로 만들기 -----
+let world = null;
+function build3D() {
+  if (world) { scene.remove(world); world.traverse(o => { if (o.isInstancedMesh) o.dispose(); if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); } }); }
+  world = new THREE.Group(); scene.add(world);
+
+  // 벽
+  const tiles = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (grid[idx(x, y)] === WALL) tiles.push([x, y]);
+  const im = new THREE.InstancedMesh(BOX, MAT.wall, tiles.length);
+  const m4 = new THREE.Matrix4(), col = new THREE.Color();
+  tiles.forEach(([x, y], i) => {
+    const h = WH * (0.9 + (hash(x, y) % 100) / 100 * 0.2);
+    m4.makeScale(1, h, 1); m4.setPosition(x + .5, h / 2, y + .5);
+    im.setMatrixAt(i, m4);
+    const v = 0.75 + (hash(y, x) % 50) / 100; col.setRGB(v, v, v * 1.02);
+    im.setColorAt(i, col);
+  });
+  world.add(im);
+
+  gens.forEach(makeGen);
+  pallets.forEach(makePallet);
+  gates.forEach(makeGate);
+  cages.forEach(makeCage);
 }
 
-function drawPlayer() {
-  const p = player;
-  if (p.state === 'carried') return;
-  const sx = SX(p.x), sy = SY(p.y);
-  const col = p.health === 2 ? '#5ec2ff' : p.health === 1 ? '#ffb347' : '#e05050';
-  ctx.save(); ctx.translate(sx, sy);
-  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(0, S * .22, S * .3, S * .12, 0, 0, 7); ctx.fill();
-  if (p.state === 'downed' || p.state === 'caged') {
-    ctx.rotate(p.dir);
-    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, S * .36, S * .2, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#f0c8a0'; ctx.beginPath(); ctx.arc(S * .3, 0, S * .13, 0, 7); ctx.fill();
+function makeGen(g) {
+  const grp = new THREE.Group(); grp.position.set(g.x + .5, 0, g.y + .5);
+  grp.rotation.y = (hash(g.x, g.y) % 4) * Math.PI / 2; world.add(grp);
+  box(.86, .62, .62, MAT.gen, 0, .31, 0, grp);
+  box(.72, .08, .5, MAT.genDark, 0, .66, 0, grp);
+  box(.1, .36, .42, MAT.darkMetal, .46, .3, 0, grp);
+  box(.5, .2, .04, MAT.genDark, 0, .42, .32, grp);
+  const pistons = [cyl(.06, .34, MAT.metal, -.2, .82, 0, grp), cyl(.06, .34, MAT.metal, .2, .82, 0, grp)];
+  const bulbs = [];
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.MeshBasicMaterial({ color: 0x2e2a16 });
+    bulbs.push(ball(.042, m, -.24 + i * .16, .42, .345, grp));
+  }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffd870, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
+  glow.scale.set(3.2, 3.2, 1); glow.position.y = .7; grp.add(glow);
+  const icon = makeIcon(iconCanvas(), g.x + .5, 1.55, g.y + .5, .5);
+  g.m = { grp, pistons, bulbs, glow, icon };
+}
+
+function makePallet(pl) {
+  const x = pl.x, y = pl.y;
+  const longX = (solid(x - 1, y) || solid(x + 1, y)) ? true : !(solid(x, y - 1) || solid(x, y + 1));
+  const pivot = new THREE.Group(); world.add(pivot);
+  if (longX) { pivot.position.set(x + .5, 0, y + .06); box(1.0, .85, .08, MAT.wood, 0, .425, 0, pivot); }
+  else { pivot.position.set(x + .06, 0, y + .5); box(.08, .85, 1.0, MAT.wood, 0, .425, 0, pivot); }
+  const debris = new THREE.Group(); debris.visible = false; world.add(debris);
+  for (let i = 0; i < 3; i++) {
+    const d = box(.45, .05, .12, MAT.wood, x + .25 + Math.random() * .5, .03, y + .25 + Math.random() * .5, debris);
+    d.rotation.y = Math.random() * 3;
+  }
+  pl.m = { pivot, longX, fall: 0, debris };
+}
+
+function makeGate(g) {
+  const [gx, gy] = g.tiles[0];
+  const grp = new THREE.Group(); grp.position.set(gx + 1, 0, gy + .5); world.add(grp);
+  const door = new THREE.Group(); grp.add(door);
+  box(2, 1.9, .1, MAT.darkMetal, 0, .95, 0, door);
+  for (let i = 0; i < 7; i++) box(.06, 1.9, .2, MAT.rust, -.9 + i * .3, .95, 0, door);
+  box(2, .1, .22, MAT.rust, 0, 1.5, 0, door); box(2, .1, .22, MAT.rust, 0, .4, 0, door);
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0x661111 });
+  box(2.2, .1, .1, lampMat, 0, 2.05, -g.out * .05, grp);
+  box(2.3, .18, .3, MAT.darkMetal, 0, 2.16, 0, grp);
+  // 스위치 (안쪽 벽에 붙어 있어요)
+  const sw = new THREE.Group(); sw.position.set(g.sw.x + .5, 0, g.sw.y + .5 - g.out * .53); world.add(sw);
+  box(.34, .44, .08, MAT.darkMetal, 0, 1.05, 0, sw);
+  const lever = box(.05, .26, .05, MAT.metal, 0, 1.05, -g.out * .07, sw);
+  const swMat = new THREE.MeshBasicMaterial({ color: 0xaa2222 });
+  ball(.05, swMat, 0, 1.22, -g.out * .06, sw);
+  const icon = makeIcon(iconCanvas(), g.sw.x + .5, 1.9, g.sw.y + .5 - g.out * .8, .55);
+  g.m = { door, lampMat, swMat, lever, icon };
+}
+
+function makeCage(c) {
+  const grp = new THREE.Group(); grp.position.set(c.x + .5, 0, c.y + .5); world.add(grp);
+  box(.92, .06, .92, MAT.darkMetal, 0, .03, 0, grp);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(.07, 1.85, .07, MAT.rust, sx * .43, .92, sz * .43, grp);
+  box(.92, .07, .92, MAT.rust, 0, 1.85, 0, grp);
+  for (let side = 0; side < 4; side++) for (let i = 1; i < 5; i++) {
+    const t = -.43 + i * .172;
+    const [bx, bz] = side === 0 ? [t, -.43] : side === 1 ? [t, .43] : side === 2 ? [-.43, t] : [.43, t];
+    if (side === 1 && (i === 2 || i === 3)) continue;   // 앞쪽 문 틈
+    cyl(.015, 1.8, MAT.metal, bx, .92, bz, grp, 5);
+  }
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]]) {
+    const sp = new THREE.Mesh(new THREE.ConeGeometry(.06, .3, 6), MAT.metal);
+    sp.position.set(sx * .4, 2.03, sz * .4); grp.add(sp);
+  }
+  cyl(.02, 1.2, MAT.metal, 0, 2.5, 0, grp, 4);
+  const icon = makeIcon(iconCanvas(), c.x + .5, 2.5, c.y + .5, .45);
+  drawCageIcon(icon.canvas); icon.tex.needsUpdate = true;
+  c.m = { icon };
+}
+
+// ----- 매 프레임 3D 맞추기 -----
+function angLerp(a, b, t) { let d = b - a; d = Math.atan2(Math.sin(d), Math.cos(d)); return a + d * t; }
+let pVisDir = 0;
+
+function sync3D(dt) {
+  const p = player, k = killer;
+
+  // 생존자
+  pMat.color.setHex(p.health === 2 ? 0x3fa3e0 : p.health === 1 ? 0xe89a3a : 0xc04040);
+  pVisDir = angLerp(pVisDir, p.dir, Math.min(1, dt * 12));
+  pBody.rotation.set(0, 0, 0); pBody.position.set(0, 0, 0); pBody.scale.set(1, 1, 1);
+  P3.visible = true;
+  const walk = p.moving ? Math.sin(p.step * 4.2) : 0;
+  pParts.legs[0].rotation.z = walk * .7; pParts.legs[1].rotation.z = -walk * .7;
+  pParts.arms[0].rotation.z = -walk * .6; pParts.arms[1].rotation.z = walk * .6;
+  if (p.act === 'gen' || p.act === 'gate') {
+    const t = Math.sin(timeT * 14) * .15;
+    pParts.arms[0].rotation.z = 1.3 + t; pParts.arms[1].rotation.z = 1.3 - t;
+  } else if (p.act === 'heal') { pParts.arms[0].rotation.z = .8; pParts.arms[1].rotation.z = 1.1 + Math.sin(timeT * 10) * .2; }
+  if (p.state === 'carried') {
+    P3.position.set(k.x - Math.cos(k.dir) * .05, 1.35, k.y - Math.sin(k.dir) * .05);
+    P3.rotation.y = -k.dir + Math.PI / 2;
+    pBody.rotation.z = -Math.PI / 2; pBody.position.set(-.55, .1, 0);
+    pParts.legs[0].rotation.z = Math.sin(timeT * 20) * (p.wiggle > 0 ? .5 : .1);
+    pParts.legs[1].rotation.z = -pParts.legs[0].rotation.z;
   } else {
-    const bob = p.moving ? Math.sin(p.step * 6) * S * .03 : 0;
-    const rr = (p.crouch ? .24 : .3) * S;
-    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, bob, rr, 0, 7); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = '#f0c8a0'; ctx.beginPath(); ctx.arc(Math.cos(p.dir) * rr * .45, Math.sin(p.dir) * rr * .45 + bob, rr * .5, 0, 7); ctx.fill();
-    ctx.fillStyle = '#222';
-    const ex = Math.cos(p.dir) * rr * .7, ey = Math.sin(p.dir) * rr * .7 + bob, px = -Math.sin(p.dir) * rr * .2, py = Math.cos(p.dir) * rr * .2;
-    ctx.beginPath(); ctx.arc(ex + px, ey + py, 1.6, 0, 7); ctx.arc(ex - px, ey - py, 1.6, 0, 7); ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawKiller() {
-  const k = killer, sx = SX(k.x), sy = SY(k.y);
-  ctx.save(); ctx.translate(sx, sy);
-  ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.ellipse(0, S * .28, S * .45, S * .16, 0, 0, 7); ctx.fill();
-  if (k.stun > 0) {
-    for (let i = 0; i < 3; i++) {
-      const a = timeT * 6 + i * 2.1;
-      ctx.fillStyle = '#ff6'; ctx.font = `${S * .3}px sans-serif`;
-      ctx.fillText('★', Math.cos(a) * S * .45 - S * .1, -S * .55 + Math.sin(a) * S * .12);
+    P3.position.set(p.x, 0, p.y);
+    P3.rotation.y = -pVisDir;
+    if (p.state === 'downed') {
+      pBody.rotation.z = -Math.PI / 2; pBody.position.set(-.55, .2, 0);
+      pParts.arms[0].rotation.z = 2.6 + walk * .5; pParts.arms[1].rotation.z = 2.6 - walk * .5;
+    } else if (p.state === 'caged') {
+      pBody.scale.set(1, .85, 1);
+      pParts.arms[0].rotation.z = 2.9 + Math.sin(timeT * 3) * .1; pParts.arms[1].rotation.z = 2.9 - Math.sin(timeT * 3) * .1;
+      P3.rotation.y = -Math.PI / 2;
+    } else if (p.state === 'vault') {
+      P3.position.y = Math.sin(Math.min(1, p.vt) * Math.PI) * .4;
+      pBody.rotation.z = -.5;
+    } else {
+      if (p.crouch && !p.act) { pBody.scale.set(1, .7, 1); pBody.rotation.z = -.25; }
+      pBody.position.y = p.moving ? Math.abs(Math.sin(p.step * 4.2)) * .04 : 0;
     }
   }
-  ctx.rotate(k.dir);
-  ctx.fillStyle = '#0e0708';
-  ctx.beginPath(); ctx.moveTo(-S * .5, -S * .42); ctx.quadraticCurveTo(S * .15, -S * .6, S * .32, 0); ctx.quadraticCurveTo(S * .15, S * .6, -S * .5, S * .42);
-  ctx.quadraticCurveTo(-S * .38, 0, -S * .5, -S * .42); ctx.fill();
-  ctx.strokeStyle = '#3a1010'; ctx.lineWidth = 2; ctx.stroke();
-  // 무기 (갈고리 낫)
-  let wa = 0;
-  if (k.atk) wa = k.atk.ph === 'wind' ? -0.9 : 0.7;
-  else if (k.busyKind === 'wipe') wa = 0.4 + Math.sin(timeT * 8) * .2;
-  ctx.save(); ctx.translate(S * .05, S * .32); ctx.rotate(wa);
-  ctx.strokeStyle = '#5a4630'; ctx.lineWidth = Math.max(2, S * .07);
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(S * .7, 0); ctx.stroke();
-  ctx.strokeStyle = killer.busyKind === 'wipe' ? '#a33' : '#bbb'; ctx.lineWidth = Math.max(2, S * .06);
-  ctx.beginPath(); ctx.arc(S * .7, -S * .22, S * .22, Math.PI * .5, Math.PI * 1.4, true); ctx.stroke();
-  ctx.restore();
-  // 머리와 눈
-  ctx.fillStyle = '#1c0d0e'; ctx.beginPath(); ctx.arc(S * .05, 0, S * .24, 0, 7); ctx.fill();
-  ctx.fillStyle = '#ff2a1a'; ctx.shadowColor = '#f00'; ctx.shadowBlur = 10;
-  ctx.beginPath(); ctx.arc(S * .2, -S * .08, S * .045, 0, 7); ctx.arc(S * .2, S * .08, S * .045, 0, 7); ctx.fill();
-  ctx.shadowBlur = 0;
-  if (k.carrying) {
-    ctx.fillStyle = player.health === 0 ? '#e05050' : '#ffb347';
-    ctx.beginPath(); ctx.ellipse(-S * .1, -S * .3, S * .3, S * .14, 0.3, 0, 7); ctx.fill();
-  }
-  ctx.restore();
-}
 
-function drawDarkness() {
-  const p = player;
-  const ox = p.state === 'carried' ? killer.x : p.x, oy = p.state === 'carried' ? killer.y : p.y;
-  const R = VISION * (0.97 + 0.03 * Math.sin(timeT * 13) * Math.sin(timeT * 7.3));
-  dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  dctx.globalCompositeOperation = 'source-over';
-  dctx.fillStyle = 'rgba(2,3,7,0.975)';
-  dctx.fillRect(0, 0, cw, ch);
-  dctx.globalCompositeOperation = 'destination-out';
-  const cx = SX(ox), cy = SY(oy);
-  const gr = dctx.createRadialGradient(cx, cy, S * .5, cx, cy, R * S);
-  gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,.88)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-  dctx.fillStyle = gr;
-  dctx.beginPath();
-  const N = 320;
-  for (let i = 0; i < N; i++) {
-    const a = i / N * Math.PI * 2;
-    const d = Math.min(R, castRay(ox, oy, a, R) + 0.38);
-    const px = cx + Math.cos(a) * d * S, py = cy + Math.sin(a) * d * S;
-    if (i === 0) dctx.moveTo(px, py); else dctx.lineTo(px, py);
-  }
-  dctx.closePath(); dctx.fill();
-  dctx.globalCompositeOperation = 'source-over';
-  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(dark, 0, 0); ctx.restore();
-}
+  // 사냥꾼
+  K3.position.set(k.x, 0, k.y);
+  K3.rotation.y = -k.dir;
+  kBody.position.y = Math.abs(Math.sin(k.step * 2.6)) * .05;
+  kBody.rotation.set(0, 0, 0);
+  let armT = .25 + Math.sin(k.step * 2.6) * .25;
+  if (k.atk) armT = k.atk.ph === 'wind' ? 2.7 : .5;
+  else if (k.busyKind === 'wipe') armT = 1.1 + Math.sin(timeT * 9) * .25;
+  else if (k.busyKind === 'kick' || k.busyKind === 'break') { armT = 1.6 + Math.sin(timeT * 14) * .5; kBody.rotation.z = -.2; }
+  else if (k.busyKind === 'pick' || k.carrying) armT = 1.4;
+  if (k.stun > 0) { kBody.rotation.z = Math.sin(timeT * 9) * .25; kBody.rotation.x = Math.sin(timeT * 6) * .2; armT = -.3; }
+  kParts.rightArm.rotation.z = lerp(kParts.rightArm.rotation.z, armT, Math.min(1, dt * (k.atk ? 22 : 8)));
+  kParts.leftArm.rotation.z = k.carrying ? 2.4 : -Math.sin(k.step * 2.6) * .25;
+  kParts.bladeMat.color.setHex(k.busyKind === 'wipe' ? 0x8a1a1a : 0xb8bcc4);
+  redLight.position.set(k.x + Math.cos(k.dir) * .5, 1.6, k.y + Math.sin(k.dir) * .5);
 
-function drawAuras() {
-  // 발전기, 출구, 우리는 어둠 속에서도 희미하게 보여요
-  ctx.lineWidth = 2;
-  if (!gatesPowered) for (const g of gens) {
-    if (g.done) continue;
-    const sx = SX(g.x) + S / 2, sy = SY(g.y) + S / 2;
-    ctx.strokeStyle = g.flash > 0 ? `rgba(255,60,60,${.4 + g.flash * .6})` : 'rgba(255,220,110,.35)';
-    ctx.strokeRect(sx - S * .4, sy - S * .38, S * .8, S * .7);
-    if (g.prog > 0) {
-      ctx.strokeStyle = g.regress ? 'rgba(255,80,80,.8)' : 'rgba(255,230,120,.8)'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(sx, sy - S * .75, S * .17, -Math.PI / 2, -Math.PI / 2 + g.prog / 100 * Math.PI * 2); ctx.stroke();
-      ctx.lineWidth = 2;
+  // 발전기
+  for (const g of gens) {
+    const m = g.m;
+    const active = player.act === 'gen' && player.target === g;
+    const pist = g.done ? Math.sin(timeT * 22) * .05 : active ? Math.sin(timeT * 10) * .04 : 0;
+    m.pistons[0].position.y = .82 + pist; m.pistons[1].position.y = .82 - pist;
+    m.bulbs.forEach((b, i) => b.material.color.setHex(g.done || g.prog >= (i + 1) * 25 ? 0xffe46b : 0x2e2a16));
+    m.glow.material.opacity = g.done ? .55 + Math.sin(timeT * 7) * .05 : 0;
+    m.grp.position.x = g.x + .5 + (active || g.done ? (Math.random() - .5) * .01 : 0);
+    const show = !g.done && !gatesPowered;
+    m.icon.s.visible = show;
+    if (show) {
+      const bad = g.flash > 0 || g.regress;
+      const key = Math.floor(g.prog / 3) + (bad ? 'b' : '');
+      if (key !== m.icon.key) { m.icon.key = key; drawGenIcon(m.icon.canvas, g.prog, bad); m.icon.tex.needsUpdate = true; }
+      const d = dist(g.x + .5, g.y + .5, p.x, p.y);
+      m.icon.mat.opacity = d < 2.5 ? .35 : .8;
     }
   }
-  if (gatesPowered) for (const g of gates) {
-    if (g.open) continue;
-    const sx = SX(g.sw.x) + S / 2, sy = SY(g.sw.y) + S / 2;
-    ctx.strokeStyle = `rgba(120,255,140,${.5 + .3 * Math.sin(timeT * 5)})`;
-    ctx.strokeRect(sx - S * .35, sy - S * .4, S * .7, S * .7);
-    for (const [x, y] of g.tiles) ctx.strokeRect(SX(x) + 2, SY(y) + 2, S - 4, S - 4);
-    if (g.prog > 0) { ctx.fillStyle = 'rgba(120,255,140,.8)'; ctx.fillRect(sx - S * .5, sy + S * .45, S * g.prog / 100, 4); }
+  // 판자
+  for (const pl of pallets) {
+    const m = pl.m;
+    const target = pl.state === 'up' ? 0 : 1;
+    m.fall = Math.min(1, Math.max(0, m.fall + (target - m.fall) * Math.min(1, dt * 18)));
+    const ang = lerp(.22, Math.PI / 2 - .09, m.fall);
+    if (m.longX) m.pivot.rotation.x = ang; else m.pivot.rotation.z = -ang;
+    m.pivot.visible = pl.state !== 'broken';
+    m.debris.visible = pl.state === 'broken';
+  }
+  // 출구
+  for (const g of gates) {
+    const m = g.m;
+    m.door.position.y = g.open ? Math.min(2.4, m.door.position.y + dt * 3) : g.prog / 100 * 1.4;
+    m.lampMat.color.setHex(g.open ? 0x40ff60 : gatesPowered ? (Math.sin(timeT * 6) > 0 ? 0x40ff60 : 0x145a1a) : 0x661111);
+    m.swMat.color.setHex(g.open ? 0x40ff60 : gatesPowered ? 0xffd040 : 0xaa2222);
+    m.lever.rotation.x = (g.open ? 1 : g.prog / 100) * 1.2 * -g.out;
+    m.icon.s.visible = gatesPowered && !g.open;
+    if (m.icon.s.visible) {
+      const key = '' + Math.floor(g.prog / 4);
+      if (key !== m.icon.key) { m.icon.key = key; drawGateIcon(m.icon.canvas, g.prog); m.icon.tex.needsUpdate = true; }
+      m.icon.mat.opacity = .6 + .3 * Math.sin(timeT * 5);
+    }
   }
   for (const c of cages) {
-    const sx = SX(c.x) + S / 2, sy = SY(c.y) + S / 2;
-    ctx.strokeStyle = killer.carrying && killer.cage === c ? `rgba(255,40,40,${.6 + .4 * Math.sin(timeT * 8)})` : 'rgba(200,40,40,.25)';
-    ctx.strokeRect(sx - S * .4, sy - S * .45, S * .8, S * .8);
+    const target = k.carrying && k.cage === c;
+    c.m.icon.mat.opacity = target ? .6 + .4 * Math.sin(timeT * 8) : .28;
   }
+
+  // 자국
+  let n = 0;
+  for (const mk of marks) {
+    if (n >= MAXDECAL) break;
+    const s = Math.max(.05, 1 - mk.age / 7);
+    dummy.position.set(mk.x, .015, mk.y); dummy.rotation.set(0, mk.a, 0); dummy.scale.set(s, 1, s);
+    dummy.updateMatrix(); markIM.setMatrixAt(n++, dummy.matrix);
+  }
+  markIM.count = n; markIM.instanceMatrix.needsUpdate = true;
+  n = 0;
+  for (const b of bloods) {
+    if (n >= MAXDECAL) break;
+    const s = b.s * Math.max(.1, 1 - b.age / 12) * 1.3;
+    dummy.position.set(b.x, .012, b.y); dummy.rotation.set(0, 0, 0); dummy.scale.set(s, 1, s);
+    dummy.updateMatrix(); bloodIM.setMatrixAt(n++, dummy.matrix);
+  }
+  bloodIM.count = n; bloodIM.instanceMatrix.needsUpdate = true;
 }
 
-function drawMotes() {
-  ctx.fillStyle = 'rgba(200,200,220,.015)';
-  for (const m of motes) {
-    m.x += m.v * 0.016; if (m.x > 1.05) m.x = -0.05;
-    ctx.beginPath(); ctx.arc(m.x * cw, (m.y * ch + Math.sin(timeT * .5 + m.s) * 20), m.s * 12, 0, 7); ctx.fill();
+const camPos = new THREE.Vector3(); let camSnap = true;
+function updateCamera() {
+  const p = player;
+  let fx = p.x, fz = p.y;
+  if (p.state === 'carried') { fx = killer.x; fz = killer.y; }
+  const fwdX = Math.cos(camYaw), fwdZ = Math.sin(camYaw);
+  const want = 2.7, minD = 1.5;
+  const ray = castRay(fx, fz, camYaw + Math.PI, want + .5) - .3;
+  let d = Math.max(.3, Math.min(want, ray));
+  const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
+  let cy = 1.05 + d * sp;
+  if (d < minD) {
+    // 뒤에 벽이 너무 가까우면 벽 위로 올라가서 내려다봐요
+    d = minD; cy = Math.max(1.05 + d * sp, 2.4);
   }
+  let cx = fx - fwdX * d * cp, cz = fz - fwdZ * d * cp;
+  if (camSnap) { camPos.set(cx, cy, cz); camSnap = false; }
+  else { const t = Math.min(1, frameDt * 12); camPos.x = lerp(camPos.x, cx, t); camPos.y = lerp(camPos.y, cy, t); camPos.z = lerp(camPos.z, cz, t); }
+  cx = camPos.x; cy = camPos.y; cz = camPos.z;
+  if (shake > 0) { cx += (Math.random() - .5) * shake * .3; cy += (Math.random() - .5) * shake * .3; cz += (Math.random() - .5) * shake * .3; }
+  camera.position.set(cx, cy, cz);
+  camera.lookAt(fx + fwdX * .8, .95, fz + fwdZ * .8);
+  const fl = .97 + .03 * Math.sin(timeT * 13) * Math.sin(timeT * 7.3);
+  lamp.position.set(fx + fwdX * .3, 1.8, fz + fwdZ * .3);
+  lamp.intensity = 1.6 * fl;
 }
 
+// ----- 화면 위 글자와 막대 -----
 function bar(x, y, w, h, v, col, label) {
   ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
   ctx.fillStyle = col; ctx.fillRect(x, y, w * Math.max(0, Math.min(1, v)), h);
@@ -1298,9 +1520,18 @@ function bar(x, y, w, h, v, col, label) {
   if (label) { ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y - 8); }
 }
 
+function drawGearMini(x, y, r, col) {
+  ctx.fillStyle = col; ctx.beginPath();
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2, rr = i % 2 ? r * .72 : r;
+    if (i === 0) ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); else ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(x, y, r * .3, 0, 7); ctx.fill();
+}
+
 function drawHUD() {
   const p = player, k = killer;
-  // 공포 테두리
   const d = dist(k.x, k.y, p.x, p.y);
   if (d < TERROR || p.health < 2) {
     const base = d < TERROR ? (1 - d / TERROR) * .35 : 0;
@@ -1311,31 +1542,24 @@ function drawHUD() {
   }
 
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  // 왼쪽 위: 발전기
-  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(10, 10, 210, 84);
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(10, 10, 220, 86);
   ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#ffd76b';
   const left = Math.max(0, D.gens - gensDone());
-  ctx.fillText(gatesPowered ? '🚪 출구 스위치를 열어라!' : `⚙️ 남은 발전기: ${left}개`, 20, 32);
-  for (let i = 0; i < D.gens; i++) {
-    ctx.fillStyle = i < gensDone() ? '#ffe46b' : '#444';
-    ctx.fillRect(20 + i * 26, 42, 20, 14);
-  }
-  // 상태
-  const st = { free: '', vault: '', downed: '쓰러짐', carried: '붙잡힘', caged: '우리에 갇힘' }[p.state] || '';
+  ctx.fillText(gatesPowered ? '출구 스위치를 열어라!' : `남은 발전기: ${left}개`, 20, 32);
+  for (let i = 0; i < D.gens; i++) drawGearMini(30 + i * 28, 52, 10, i < gensDone() ? '#ffe46b' : '#4a4a4a');
+  const st = { downed: '쓰러짐', carried: '붙잡힘', caged: '갇힘' }[p.state] || '';
   const hp = p.health === 2 ? '건강' : p.health === 1 ? '부상' : '빈사';
   ctx.font = 'bold 14px sans-serif';
   ctx.fillStyle = p.health === 2 ? '#5ec2ff' : p.health === 1 ? '#ffb347' : '#f66';
-  ctx.fillText(`❤ ${st || hp}`, 20, 80);
-  ctx.fillStyle = '#ccc'; ctx.fillText('⛓', 120, 80);
-  for (let i = 0; i < 3; i++) { ctx.fillStyle = i < p.cageCount ? '#e33' : '#555'; ctx.beginPath(); ctx.arc(146 + i * 18, 75, 6, 0, 7); ctx.fill(); }
+  ctx.fillText(`상태: ${st || hp}`, 20, 85);
+  ctx.fillStyle = '#ccc'; ctx.fillText('우리', 128, 85);
+  for (let i = 0; i < 3; i++) { ctx.fillStyle = i < p.cageCount ? '#e33' : '#555'; ctx.beginPath(); ctx.arc(170 + i * 17, 80, 6, 0, 7); ctx.fill(); }
 
-  // 추격 표시
   if (k.mode === 'chase' && (p.state === 'free' || p.state === 'vault')) {
     ctx.textAlign = 'center'; ctx.font = 'bold 18px sans-serif';
     ctx.fillStyle = `rgba(255,60,60,${.6 + .4 * Math.sin(timeT * 8)})`;
-    ctx.fillText('⚠ 추격당하는 중!', cw / 2, cw < 640 ? 118 : 30);
+    ctx.fillText('추격당하는 중!', cw / 2, cw < 640 ? 118 : 30);
   }
-  // 메시지
   ctx.textAlign = 'center';
   const my0 = cw < 640 ? 130 : 44;
   msgs.forEach((m, i) => {
@@ -1348,8 +1572,7 @@ function drawHUD() {
   });
   ctx.globalAlpha = 1;
 
-  // 진행 막대
-  const bw = Math.min(320, cw * .7), bx = cw / 2 - bw / 2, by = ch * .78;
+  const bw = Math.min(320, cw * .7), bx = cw / 2 - bw / 2, by = ch * .74;
   if (p.act === 'gen') bar(bx, by, bw, 14, p.target.prog / 100, '#ffd76b', '발전기 수리 중');
   else if (p.act === 'gate') bar(bx, by, bw, 14, p.target.prog / 100, '#6f6', '출구 여는 중');
   else if (p.act === 'heal') bar(bx, by, bw, 14, p.heal / 100, '#6cf', '치료 중');
@@ -1363,10 +1586,9 @@ function drawHUD() {
   if (p.prompt) {
     ctx.font = 'bold 16px sans-serif';
     const w = ctx.measureText(p.prompt).width + 24;
-    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(cw / 2 - w / 2, ch * .86 - 20, w, 30);
-    ctx.fillStyle = '#fff'; ctx.fillText(p.prompt, cw / 2, ch * .86);
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(cw / 2 - w / 2, ch * .84 - 20, w, 30);
+    ctx.fillStyle = '#fff'; ctx.fillText(p.prompt, cw / 2, ch * .84);
   }
-  // 팝업 글자
   pops.forEach((q, i) => {
     ctx.globalAlpha = Math.min(1, q.t * 2);
     ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = q.col;
@@ -1374,7 +1596,6 @@ function drawHUD() {
   });
   ctx.globalAlpha = 1;
 
-  // 스킬 체크
   if (sc) {
     const cx = cw / 2, cy = ch * .47, R = Math.max(40, Math.min(cw, ch) * .085);
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.arc(cx, cy, R + 14, 0, 7); ctx.fill();
@@ -1394,64 +1615,66 @@ function drawHUD() {
       ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * R * .55, cy + Math.sin(a) * R * .55); ctx.lineTo(cx + Math.cos(a) * (R + 12), cy + Math.sin(a) * (R + 12)); ctx.stroke();
     }
   }
-  // 시간
   ctx.textAlign = 'right'; ctx.font = '13px sans-serif'; ctx.fillStyle = '#999';
   const mm = Math.floor(timeT / 60), ss = Math.floor(timeT % 60);
-  ctx.fillText(`${mm}:${String(ss).padStart(2, '0')}`, cw - 60, 32);
+  ctx.fillText(`${mm}:${String(ss).padStart(2, '0')}`, cw - 64, 32);
+  if (!isTouch && document.pointerLockElement !== cvs && gameState === 'play') {
+    ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fillText('화면을 클릭하면 마우스로 시점을 돌릴 수 있어요', cw / 2, ch - 16);
+  }
   ctx.textAlign = 'left';
 }
 
-function render() {
+function render(dt) {
+  if (grid && player) { sync3D(dt); updateCamera(); }
+  else { camera.position.set(W / 2, 6, H / 2); camera.lookAt(W / 2 + 5, 0, H / 2 + 5); }
+  renderer.render(scene, camera);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cw, ch);
-  if (!grid) return;
-  viewX = camX + (shake > 0 ? (Math.random() - .5) * shake * .6 : 0);
-  viewY = camY + (shake > 0 ? (Math.random() - .5) * shake * .6 : 0);
-  drawTiles();
-  drawMarks();
-  drawCages();
-  drawGens();
-  drawPlayer();
-  drawKiller();
-  drawDarkness();
-  drawMotes();
-  drawAuras();
-  drawHUD();
+  ctx.clearRect(0, 0, cw, ch);
+  if (player && gameState !== 'menu') drawHUD();
 }
 
 // ---------- 화면 전환 ----------
 const $ = id => document.getElementById(id);
 function show(id, on) { $(id).classList.toggle('hidden', !on); }
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+let lockWanted = false, lastPause = 0;
+function releaseMouse() { lockWanted = false; if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock(); }
 
 function endGame(win, why) {
   if (gameState !== 'play') return;
   gameState = 'over'; sc = null;
+  releaseMouse();
   if (win) sfx.win(); else sfx.lose();
   const mm = Math.floor(timeT / 60), ss = Math.floor(timeT % 60);
-  $('overTitle').textContent = win ? '🌅 탈출 성공!' : '💀 희생당했다...';
+  $('overTitle').textContent = win ? '탈출 성공!' : '희생당했다...';
   $('overTitle').style.color = win ? '#7f7' : '#ff5a4a';
   $('overSub').textContent = win ? `난이도 ${D.name} · 장원에서 살아서 빠져나왔다!` : `난이도 ${D.name} · ${why || ''}`;
   $('overStats').innerHTML =
-    `⏱ 걸린 시간: <b>${mm}분 ${ss}초</b><br>` +
-    `⚙️ 고친 발전기: <b>${stats.gens}개</b><br>` +
-    `✨ 스킬 체크: 대성공 <b>${stats.great}</b> · 성공 <b>${stats.good}</b> · 실패 <b>${stats.fail}</b><br>` +
-    `💥 판자 기절: <b>${stats.stuns}번</b><br>` +
-    `🩸 맞은 횟수: <b>${stats.hits}번</b> · 몸부림 탈출: <b>${stats.wiggles}번</b><br>` +
-    `⛓️ 우리에 갇힌 횟수: <b>${stats.caged}번</b>`;
-  setTimeout(() => { show('over', true); show('touch', false); show('pauseBtn', false); }, 900);
+    `걸린 시간: <b>${mm}분 ${ss}초</b><br>` +
+    `고친 발전기: <b>${stats.gens}개</b><br>` +
+    `스킬 체크: 대성공 <b>${stats.great}</b> · 성공 <b>${stats.good}</b> · 실패 <b>${stats.fail}</b><br>` +
+    `판자 기절: <b>${stats.stuns}번</b><br>` +
+    `맞은 횟수: <b>${stats.hits}번</b> · 몸부림 탈출: <b>${stats.wiggles}번</b><br>` +
+    `우리에 갇힌 횟수: <b>${stats.caged}번</b>`;
+  setTimeout(() => { if (gameState !== 'over') return; show('over', true); show('touch', false); show('pauseBtn', false); }, 900);
 }
 
 function togglePause() {
-  if (gameState === 'play') { gameState = 'paused'; show('pause', true); }
-  else if (gameState === 'paused') { gameState = 'play'; show('pause', false); }
+  const now = performance.now();
+  if (now - lastPause < 300) return;
+  lastPause = now;
+  if (gameState === 'play') { gameState = 'paused'; show('pause', true); releaseMouse(); }
+  else if (gameState === 'paused') { gameState = 'play'; show('pause', false); grabMouse(); }
 }
+function grabMouse() { if (!isTouch && cvs.requestPointerLock) { try { cvs.requestPointerLock(); } catch (e) {} } }
 
-const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 function start() {
   initAudio();
   newGame();
   show('menu', false); show('over', false); show('pause', false);
   show('touch', isTouch); show('pauseBtn', isTouch);
+  grabMouse();
 }
 
 document.querySelectorAll('.diff').forEach(b => b.onclick = () => {
@@ -1465,36 +1688,62 @@ $('resumeBtn').onclick = togglePause;
 $('quitBtn').onclick = () => { show('pause', false); show('menu', true); show('touch', false); show('pauseBtn', false); gameState = 'menu'; };
 $('pauseBtn').onclick = togglePause;
 
+// ---------- 마우스 시점 ----------
+function look(dx, dy) { camYaw += dx; camPitch = Math.max(-0.15, Math.min(1.1, camPitch + dy)); }
+let dragging = false, lastMX = 0, lastMY = 0;
+cvs.addEventListener('mousedown', e => {
+  initAudio();
+  if (gameState !== 'play') return;
+  if (document.pointerLockElement !== cvs) grabMouse();
+  dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+});
+addEventListener('mouseup', () => dragging = false);
+addEventListener('mousemove', e => {
+  if (gameState !== 'play') return;
+  if (document.pointerLockElement === cvs) look(e.movementX * .0026, e.movementY * .0026);
+  else if (dragging) { look((e.clientX - lastMX) * .005, (e.clientY - lastMY) * .005); lastMX = e.clientX; lastMY = e.clientY; }
+});
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement === cvs) lockWanted = true;
+  else if (lockWanted) { lockWanted = false; if (gameState === 'play') togglePause(); }
+});
+
 // ---------- 터치 조작 ----------
-let stickId = null, stickBase = null;
+let stickId = null, stickBase = null, lookId = null, lookLast = null;
 const stickEl = $('stick'), knobEl = $('knob');
 cvs.addEventListener('touchstart', e => {
   initAudio();
   for (const t of e.changedTouches) {
-    if (stickId === null && t.clientX < innerWidth * 0.55) {
+    if (stickId === null && t.clientX < innerWidth * 0.5) {
       stickId = t.identifier; stickBase = { x: t.clientX, y: t.clientY };
       stickEl.style.display = 'block'; stickEl.style.left = t.clientX + 'px'; stickEl.style.top = t.clientY + 'px';
       knobEl.style.transform = 'translate(0,0)';
-    }
+    } else if (lookId === null) { lookId = t.identifier; lookLast = { x: t.clientX, y: t.clientY }; }
   }
   e.preventDefault();
 }, { passive: false });
 cvs.addEventListener('touchmove', e => {
-  for (const t of e.changedTouches) if (t.identifier === stickId) {
-    let dx = t.clientX - stickBase.x, dy = t.clientY - stickBase.y;
-    const l = Math.hypot(dx, dy), m = 50;
-    if (l > m) { dx = dx / l * m; dy = dy / l * m; }
-    touch.mx = dx / m; touch.my = dy / m;
-    knobEl.style.transform = `translate(${dx}px,${dy}px)`;
+  for (const t of e.changedTouches) {
+    if (t.identifier === stickId) {
+      let dx = t.clientX - stickBase.x, dy = t.clientY - stickBase.y;
+      const l = Math.hypot(dx, dy), m = 50;
+      if (l > m) { dx = dx / l * m; dy = dy / l * m; }
+      touch.mx = dx / m; touch.my = dy / m;
+      knobEl.style.transform = `translate(${dx}px,${dy}px)`;
+    } else if (t.identifier === lookId) {
+      if (gameState === 'play') look((t.clientX - lookLast.x) * .007, (t.clientY - lookLast.y) * .007);
+      lookLast = { x: t.clientX, y: t.clientY };
+    }
   }
   e.preventDefault();
 }, { passive: false });
-function endStick(e) {
-  for (const t of e.changedTouches) if (t.identifier === stickId) {
-    stickId = null; touch.mx = 0; touch.my = 0; stickEl.style.display = 'none';
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === stickId) { stickId = null; touch.mx = 0; touch.my = 0; stickEl.style.display = 'none'; }
+    if (t.identifier === lookId) lookId = null;
   }
 }
-cvs.addEventListener('touchend', endStick); cvs.addEventListener('touchcancel', endStick);
+cvs.addEventListener('touchend', endTouch); cvs.addEventListener('touchcancel', endTouch);
 
 document.querySelectorAll('.tb').forEach(b => {
   const k = b.dataset.k;
@@ -1511,9 +1760,9 @@ document.querySelectorAll('.tb').forEach(b => {
 // ---------- 메인 루프 ----------
 let lastT = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now; frameDt = dt;
   if (gameState === 'play') update(dt);
-  render();
+  render(dt);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
