@@ -168,13 +168,13 @@
 const T = 2, GW = 22, GH = 14;                 // 타일 크기, 가로·세로 칸 수
 // 난이도 — waves: 마지막 웨이브, hp: 적 체력 배수, count: 적 수 배수, speed: 적 속도 배수
 const DIFFS = {
-  easy:   { name: "이지",   icon: "🌱", waves: 15, hp: 0.7, count: 0.85, speed: 1,    cash: 800, baseHp: 150, coinMul: 0.8, winCoin: 300,  winGem: 2,
+  easy:   { name: "이지",   icon: "🌱", waves: 15, hp: 0.7, count: 0.85, speed: 1,    cash: 800, baseHp: 150, coinMul: 0.8, winCoin: 300,  winGem: 2,  boss: { hp: 0.3, armor: 2, stunR: 4.5, stunT: 1.5, speed: 0.9 },
             desc: "처음 하는 사람용. 적이 약하고 돈이 넉넉해요." },
-  normal: { name: "보통",   icon: "⚔️", waves: 20, hp: 1,   count: 1,    speed: 1,    cash: 650, baseHp: 100, coinMul: 1,   winCoin: 600,  winGem: 5,
+  normal: { name: "보통",   icon: "⚔️", waves: 20, hp: 1,   count: 1,    speed: 1,    cash: 650, baseHp: 100, coinMul: 1,   winCoin: 600,  winGem: 5,  boss: { hp: 0.7, armor: 5, stunR: 6, stunT: 3, speed: 1 },
             desc: "기본 난이도. 10·20웨이브에 보스가 나와요." },
-  hard:   { name: "하드",   icon: "🔥", waves: 25, hp: 1.45, count: 1.2, speed: 1.05, cash: 600, baseHp: 80,  coinMul: 1.3, winCoin: 1000, winGem: 10,
+  hard:   { name: "하드",   icon: "🔥", waves: 25, hp: 1.45, count: 1.2, speed: 1.05, cash: 600, baseHp: 80,  coinMul: 1.3, winCoin: 1000, winGem: 10, boss: { hp: 1.45, armor: 10, stunR: 7, stunT: 4, speed: 1 },
             desc: "적이 많고 단단해요. 전략이 필요해요." },
-  cursed: { name: "저주받은", icon: "💀", waves: 35, hp: 2.1, count: 1.35, speed: 1.15, cash: 600, baseHp: 50,  coinMul: 1.8, winCoin: 2500, winGem: 40, firstGem: 30, cursed: true,
+  cursed: { name: "저주받은", icon: "💀", waves: 35, hp: 2.1, count: 1.35, speed: 1.15, cash: 600, baseHp: 50,  coinMul: 1.8, winCoin: 2500, winGem: 40, firstGem: 30, cursed: true, boss: { hp: 2.1, armor: 12, stunR: 7, stunT: 4, speed: 1 },
             desc: "이상하게 생긴 저주받은 적들이 몰려와요… 하늘이 붉게 물들어요." },
 };
 const DIFF_ORDER = ["easy", "normal", "hard", "cursed"];
@@ -731,7 +731,7 @@ function startWave() {
   if (G.waveActive) { if (!canSkip()) return; payWave(G.wave, true); }   // 스킵: 지금 웨이브 보상을 받고 다음 웨이브 바로 시작
   G.wave++; G.waveActive = true; G.waveT = 0; G.spawnT = Math.min(G.spawnT, 0.3);
   const w = G.wave - 1; G.hpMul = (1 + 0.12 * w + 0.006 * w * w) * G.diff.hp;
-  const bossMul = Math.pow(Math.max(1, G.wave / 10), 1.6) * G.diff.hp;
+  const bossMul = Math.pow(Math.max(1, G.wave / 10), 1.6) * G.diff.boss.hp;
   for (const it of makeWave(G.wave)) { it.mul = it.t === "boss" ? bossMul : G.hpMul; G.queue.push(it); }
   showBanner(G.wave === G.maxW ? "⚠️ 마지막 웨이브 " + G.wave + " ⚠️" : G.wave % 10 === 0 ? "⚠️ 보스 웨이브 " + G.wave + " ⚠️" : "웨이브 " + G.wave, 1.6);
   updateHUD(true);
@@ -749,6 +749,11 @@ function spawnEnemy(type, mul) {
   const hp = d.hp * mul;
   const e = { type, def: d, hp, max: hp, d: 0, speed: d.speed * G.diff.speed * (0.95 + Math.random() * 0.1), mesh: m.g, legs: m.legs, cm: m.cursed ? m : null, phase: Math.random() * 6,
     abT: d.stun ? d.stun.cd * 0.6 : 0, side: (Math.random() - 0.5) * 0.8, pos: V(0, 0, 0), reward: Math.round(d.reward * (1 + G.wave * 0.03)) };
+  // 보스는 난이도에 따라 방어력 · 기절 능력 · 속도가 달라요
+  const B = G.diff.boss;
+  e.armor = d.boss ? B.armor : (d.armor || 0);
+  e.stun = d.boss ? { r: B.stunR, t: B.stunT, cd: d.stun.cd } : d.stun;
+  if (d.boss) e.speed *= B.speed;
   e.bar = makeBar(d.boss ? 2.5 : 0.9 * d.scale, d.boss ? 0xa855f7 : 0xef4444); e.barY = (m.cursed ? 2.9 : 1.95) * d.scale + 0.2;
   world.add(e.mesh); enemies.push(e);
   if (d.boss) showBanner(G.diff.cursed ? "💀 저주받은 보스 등장!" : "👹 보스 등장!", 1.5);
@@ -756,7 +761,7 @@ function spawnEnemy(type, mul) {
 
 function hurt(e, amt, pierceArmor) {
   if (e.dead) return;
-  if (e.def.armor && !pierceArmor) amt = Math.max(amt * 0.2, amt - e.def.armor);
+  if (e.armor && !pierceArmor) amt = Math.max(amt * 0.2, amt - e.armor);
   e.hp -= amt;
   if (e.hp <= 0) {
     e.dead = true; G.cash += e.reward; G.kills++;
@@ -883,12 +888,12 @@ function update(dt) {
     if (e.cm) cursedAnim(e, dt);
     e.bar.position.set(e.pos.x, e.barY, e.pos.z); setBar(e.bar, e.hp / e.max);
     // 기절 공격
-    if (e.def.stun) {
+    if (e.stun) {
       e.abT -= dt;
       if (e.abT <= 0) {
-        e.abT = e.def.stun.cd; const r2 = e.def.stun.r * e.def.stun.r; let hit = 0;
-        for (const t of towers) { if (t.type === "farm") continue; const dx = t.x - e.pos.x, dz = t.z - e.pos.z; if (dx * dx + dz * dz <= r2) { t.stun = Math.max(t.stun, e.def.stun.t); hit++; } }
-        addFx("ring", e.pos.x, 0.2, e.pos.z, e.def.stun.r, 0xc084fc, 0.5);
+        e.abT = e.stun.cd; const r2 = e.stun.r * e.stun.r; let hit = 0;
+        for (const t of towers) { if (t.type === "farm") continue; const dx = t.x - e.pos.x, dz = t.z - e.pos.z; if (dx * dx + dz * dz <= r2) { t.stun = Math.max(t.stun, e.stun.t); hit++; } }
+        addFx("ring", e.pos.x, 0.2, e.pos.z, e.stun.r, 0xc084fc, 0.5);
         if (hit) floatAt("⚡기절!", e.pos.x, 2.5 * e.def.scale, e.pos.z, "#e9d5ff");
       }
     }
